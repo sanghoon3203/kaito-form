@@ -43,6 +43,11 @@ try {
   check('missing 案件名 is rejected', $s === 400);
   [$s] = call('POST', 'api.php?action=prepare', ['heating' => '床暖'] + $fields + ['files' => $files, 'token' => 'x']);
   check('unknown 床下暖房種別 is rejected', $s === 400);
+  $badEmails = ['', '   ', 'a b@example.com', "a\u{3000}b@example.com", 'a@exa mple.com', 'ａｂｃ＠ｅｘａｍｐｌｅ．ｃｏｍ', 'abc＠example.com', 'テスト@example.com'];
+  foreach ($badEmails as $bad) {
+    [$s] = call('POST', 'api.php?action=prepare', ['email' => $bad] + $fields + ['files' => $files, 'token' => 'x']);
+    check('email ' . json_encode($bad, JSON_UNESCAPED_UNICODE) . ' is rejected', $s === 400);
+  }
   [$s] = call('POST', 'api.php?action=prepare', $fields + ['files' => [['name' => 'a.exe', 'size' => 1]], 'token' => 'x']);
   check('non PDF/JWW file is rejected', $s === 400);
 

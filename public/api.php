@@ -120,6 +120,7 @@ function validate_fields(array $data): ?array {
   $date = function (string $v): bool { return $v === '' || (bool) preg_match('/^\d{4}-\d{2}-\d{2}$/D', $v); };
   if ($fields['company'] === '' || $fields['contact'] === '' || $fields['projectName'] === '' ||
       $fields['projectAddress'] === '' || !filter_var($fields['email'], FILTER_VALIDATE_EMAIL) ||
+      preg_match('/[^\x21-\x7e]/', $fields['email']) || // 半角・全角スペースや全角文字を含むメールアドレスは受け付けない
       ($fields['heating'] !== '' && !in_array($fields['heating'], HEATING_TYPES, true)) ||
       !$date($fields['start'])) return null;
   return $fields;

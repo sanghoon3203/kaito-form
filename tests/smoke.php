@@ -54,6 +54,9 @@ try {
   [$s, $r, $raw] = call('POST', 'api.php?action=prepare', $fields + ['files' => $files, 'token' => 'XXXX.DUMMY.TOKEN']);
   check('prepare succeeds with Turnstile test key', $s === 200 && count($r['uploads'] ?? []) === 1, $raw);
   $sent = json_decode((string) @file_get_contents("$tmp/kaito-mock-prepare.json"), true);
+  $decoded = base64_decode(explode('.', $r['uploads'][0] ?? '.')[0]) . base64_decode(explode('.', $r['receipt'] ?? '.')[0]);
+  check('tokens do not reveal the upload URL or form data', $decoded !== '' && strpos($decoded, 'googleapis') === false &&
+    strpos($decoded, 'FOLDER') === false && strpos($decoded, 'テスト工務店') === false);
   check('prepare sends company and files to Apps Script', ($sent['company'] ?? '') === 'テスト工務店' && ($sent['files'][0]['name'] ?? '') === 'plan.pdf');
 
   [$s] = call('POST', 'api.php?action=upload', 'abc', ['X-Upload-Key: ' . $r['uploads'][0], 'X-Content-Range: bytes 0-2/999']);

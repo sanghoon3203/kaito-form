@@ -66,8 +66,17 @@ function http(string $method, string $url, array $headers = [], ?string $body = 
 
 function b64(string $bytes): string { return base64_encode($bytes); }
 
+// ブラウザに渡すトークン。中身(Google の送信先 URL など)は暗号化して、ブラウザからは読めないようにする。
+// 読めると、ブラウザが api.php を通さずに Google へ直接送り、ファイル形式のチェックを飛ばせてしまう。
+function capability_key(string $secret): string { return hash('sha256', 'kaito-form capability|' . $secret, true); }
+
 function capability(array $value, string $secret): string {
-  $payload = b64(json_encode($value + ['expires' => time() + TOKEN_TTL], JSON_UNESCAPED_UNICODE));
+  $iv = random_bytes(12);
+  $tag = '';
+  $plain = json_encode($value + ['expires' => time() + TOKEN_TTL], JSON_UNESCAPED_UNICODE);
+  $cipher = openssl_encrypt($plain, 'aes-256-gcm', capability_key($secret), OPENSSL_RAW_DATA, $iv, $tag);
+  if ($cipher === false) throw new RuntimeException('Could not encrypt token');
+  $payload = b64($iv . $tag . $cipher);
   return $payload . '.' . b64(hash_hmac('sha256', $payload, $secret, true));
 }
 
@@ -76,7 +85,11 @@ function read_capability($token, string $kind, string $secret): ?array {
       !preg_match('~^[A-Za-z0-9+/]+={0,2}\.[A-Za-z0-9+/]{43}=$~D', $token)) return null;
   [$payload, $signature] = explode('.', $token);
   if (!hash_equals(b64(hash_hmac('sha256', $payload, $secret, true)), $signature)) return null;
-  $value = json_decode((string) base64_decode($payload, true), true);
+  $raw = (string) base64_decode($payload, true);
+  if (strlen($raw) < 29) return null;
+  $plain = openssl_decrypt(substr($raw, 28), 'aes-256-gcm', capability_key($secret), OPENSSL_RAW_DATA,
+    substr($raw, 0, 12), substr($raw, 12, 16));
+  $value = $plain === false ? null : json_decode($plain, true);
   return is_array($value) && ($value['kind'] ?? '') === $kind && ($value['expires'] ?? 0) >= time() ? $value : null;
 }
 

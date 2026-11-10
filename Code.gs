@@ -125,11 +125,35 @@ function findRiskyPdfNames(bytes) {
   return [...new Set(text.match(RISKY_PDF_NAMES) || [])];
 }
 
+const FILE_SIGNATURES = { pdf: '%PDF-', jww: 'JwwData.' }; // api.php と同じ
+
+// ドライブに保存されたファイルの先頭を読み、拡張子どおりの形式かを確かめる。api.php でも確かめているが、
+// 中継を通らずに送られた場合に備えて、ここでもう一度見る。
+function hasExpectedHeader(file) {
+  const signature = FILE_SIGNATURES[((file.name.match(/\.([a-z]+)$/i) || [])[1] || '').toLowerCase()];
+  if (!signature) return false;
+  const response = UrlFetchApp.fetch('https://www.googleapis.com/drive/v3/files/' + encodeURIComponent(file.id) +
+    '?alt=media&supportsAllDrives=true', {
+    headers: { Authorization: 'Bearer ' + ScriptApp.getOAuthToken(), Range: 'bytes=0-' + (signature.length - 1) },
+    muteHttpExceptions: true,
+  });
+  const head = response.getContent().slice(0, signature.length).map(b => String.fromCharCode(b & 255)).join('');
+  return response.getResponseCode() < 300 && head === signature;
+}
+
 function inspectUploadedFiles(files) {
   let budget = SCAN_BUDGET;
   const warnings = [];
   files.forEach(file => {
-    if (!/\.pdf$/i.test(file.name)) return; // JWW は PHP 側で先頭の形式を確かめている
+    let headerOk = false;
+    try { headerOk = hasExpectedHeader(file); } catch (error) { /* 下で扱う */ }
+    if (!headerOk) {
+      // 拡張子と中身が違うファイル(実行ファイルの偽装など)は、開かれないようにゴミ箱へ移す
+      try { DriveApp.getFileById(file.id).setTrashed(true); } catch (error) { /* 警告だけ残す */ }
+      warnings.push(file.name + '：拡張子と中身の形式が一致しないため、ゴミ箱に移しました');
+      return;
+    }
+    if (!/\.pdf$/i.test(file.name)) return;
     if (file.size > budget) { warnings.push(file.name + '：未検査（合計サイズの上限を超えたため）'); return; }
     budget -= file.size;
     try {

@@ -28,8 +28,21 @@ function load(files = {}) {
   const ctx = {
     SpreadsheetApp: {}, console,
     Utilities: { formatDate: () => '2026/11/10', newBlob: b => ({ getDataAsString: () => Buffer.from(b).toString('latin1') }) },
-    DriveApp: { getFileById: id => ({ getBlob: () => ({ getBytes: () => Buffer.from(files[id], 'latin1') }) }) },
+    DriveApp: { getFileById: id => ({
+      getBlob: () => ({ getBytes: () => Buffer.from(files[id], 'latin1') }),
+      setTrashed: () => trashed.push(id),
+    }) },
+    ScriptApp: { getOAuthToken: () => 'token' },
+    // Range 指定の先頭バイト読み出し。Apps Script と同じく符号付きバイトの配列を返す
+    UrlFetchApp: { fetch: (url, opts) => {
+      const id = decodeURIComponent(url.split('/files/')[1].split('?')[0]);
+      const end = Number(opts.headers.Range.split('-')[1]);
+      const bytes = [...Buffer.from(files[id] || '', 'latin1').subarray(0, end + 1)].map(b => (b > 127 ? b - 256 : b));
+      return { getResponseCode: () => (id in files ? 206 : 404), getContent: () => bytes };
+    } },
   };
+  const trashed = [];
+  ctx.trashed = trashed;
   vm.createContext(ctx);
   vm.runInContext(fs.readFileSync(__dirname + '/../Code.gs', 'utf8'), ctx);
   return ctx;
@@ -85,6 +98,9 @@ const pdfs = {
   js: '%PDF-1.7\n1 0 obj << /S /JavaScript /JS (app.alert(1)) >> endobj',
   hidden: '%PDF-1.7\n1 0 obj << /S /L#61unch /F (cmd.exe) >> endobj',
   embedded: '%PDF-1.7\n<< /Names << /EmbeddedFiles 4 0 R >> >>',
+  jww: 'JwwData.\xc8\x02\x00\x00',
+  fakeJww: 'MZ\x90\x00 this is an exe',
+  fakePdf: 'MZ\x90\x00 this is an exe',
 };
 const scan = load(pdfs);
 assert.deepStrictEqual([...scan.findRiskyPdfNames(Buffer.from(pdfs.clean, 'latin1'))], []);
@@ -92,9 +108,16 @@ assert.deepStrictEqual([...scan.findRiskyPdfNames(Buffer.from(pdfs.js, 'latin1')
 assert.deepStrictEqual([...scan.findRiskyPdfNames(Buffer.from(pdfs.hidden, 'latin1'))], ['/Launch']);
 const warnings = scan.inspectUploadedFiles([
   { id: 'clean', name: 'a.pdf', size: 10 }, { id: 'embedded', name: 'b.pdf', size: 10 },
-  { id: 'none', name: 'c.jww', size: 10 }, { id: 'js', name: 'd.pdf', size: 200 * 1024 * 1024 },
+  { id: 'jww', name: 'c.jww', size: 10 }, { id: 'js', name: 'd.pdf', size: 200 * 1024 * 1024 },
+  { id: 'fakeJww', name: 'e.jww', size: 10 }, { id: 'fakePdf', name: 'f.PDF', size: 10 },
 ]);
-assert.deepStrictEqual([...warnings], ['b.pdf：/EmbeddedFiles', 'd.pdf：未検査（合計サイズの上限を超えたため）']);
+assert.deepStrictEqual([...warnings], [
+  'b.pdf：/EmbeddedFiles',
+  'd.pdf：未検査（合計サイズの上限を超えたため）',
+  'e.jww：拡張子と中身の形式が一致しないため、ゴミ箱に移しました',
+  'f.PDF：拡張子と中身の形式が一致しないため、ゴミ箱に移しました',
+]);
+assert.deepStrictEqual([...scan.trashed], ['fakeJww', 'fakePdf'], 'only disguised files are trashed');
 
 // 6. 警告は案件基本情報の備考にも残る
 s = fakeSheet(HEADERS, []);

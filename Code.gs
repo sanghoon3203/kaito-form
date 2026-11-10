@@ -1,4 +1,4 @@
-// Script properties: ROOT_FOLDER_ID, SHEET_ID, SHARED_SECRET.
+// Script properties: ROOT_FOLDER_ID, SHEET_ID, SHARED_SECRET, NOTIFY_EMAIL.
 function doPost(e) {
   const output = value => ContentService.createTextOutput(JSON.stringify(value)).setMimeType(ContentService.MimeType.JSON);
   try {
@@ -153,7 +153,8 @@ function verifyUploadAccess() {
 
 function notifyReceipt(data, filenames, folderUrl, spreadsheetUrl) {
   const displayName = '株式会社カイトー商会 申込受付';
-  const recipient = 'kim@baqool.jp';
+  const recipient = PropertiesService.getScriptProperties().getProperty('NOTIFY_EMAIL');
+  if (!recipient) return;
   const oneLine = value => String(value || '').replace(/[\r\n\x00-\x1f\x7f]+/g, ' ').trim();
   const company = oneLine(data.company);
   const subject = '【' + displayName + '】' + company + 'からの依頼が届いてます！';

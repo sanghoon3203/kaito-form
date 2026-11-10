@@ -78,14 +78,14 @@ page_start('お問い合わせ | BAQOOL サポート');
         <label for="drawing" id="drawing-label">図面ファイル<span class="req">必須</span></label>
         <?php /* 送信されるのはこの入力欄。JavaScript が動くときは隠し、下の「ファイルを追加」と一覧で選んだファイルをここに入れる */ ?>
         <input id="drawing" name="drawing[]" type="file" accept="application/pdf,.pdf,.jww" multiple required aria-describedby="drawing-hint"
-          data-max-size="<?= max_file_size() ?>" data-max-total="<?= max_total_size() ?>">
+          data-max-size="<?= max_file_size() ?>" data-max-total="<?= max_total_size() ?>" data-max-files="<?= MAX_FILES ?>">
         <div class="file-box" id="drawing-box" hidden>
           <input class="visually-hidden" id="drawing-picker" type="file" accept="application/pdf,.pdf,.jww" multiple aria-describedby="drawing-hint">
           <label class="file-add" for="drawing-picker">＋ ファイルを追加</label>
           <ul class="file-list" id="drawing-list" aria-label="添付するファイル"></ul>
           <p class="file-error" id="drawing-error" role="alert"></p>
         </div>
-        <p class="hint" id="drawing-hint">PDFとJWWをそれぞれ10ファイルまで、1ファイル<?= h(format_mb(max_file_size())) ?>まで、合計<?= h(format_mb(max_total_size())) ?>まで添付できます。</p>
+        <p class="hint" id="drawing-hint">PDF・JWWファイルを合計<?= MAX_FILES ?>個まで添付できます（1ファイル<?= h(format_mb(max_file_size())) ?>まで、合計<?= h(format_mb(max_total_size())) ?>まで）。</p>
       </div>
     </div>
 
@@ -109,7 +109,7 @@ page_start('お問い合わせ | BAQOOL サポート');
   if (!real || !picker || typeof DataTransfer !== 'function') return;
   const maxSize = Number(real.dataset.maxSize);
   const maxTotal = Number(real.dataset.maxTotal);
-  const maxPerType = 10;
+  const maxFiles = Number(real.dataset.maxFiles);
   let files = [];
 
   document.getElementById('drawing-box').hidden = false;
@@ -155,7 +155,7 @@ page_start('お問い合わせ | BAQOOL サポート');
       if (!kind) { problems.push(file.name + '：PDFまたはJWWファイルを選んでください。'); continue; }
       if (file.size > maxSize) { problems.push(file.name + '：1ファイル' + mb(maxSize) + 'までです。'); continue; }
       if (files.some(f => f.name === file.name && f.size === file.size)) { problems.push(file.name + '：すでに追加されています。'); continue; }
-      if (files.filter(f => type(f) === kind).length >= maxPerType) { problems.push(file.name + '：' + kind.toUpperCase() + 'は10ファイルまでです。'); continue; }
+      if (files.length >= maxFiles) { problems.push(file.name + '：ファイルは合計' + maxFiles + '個までです。'); continue; }
       if (files.reduce((sum, f) => sum + f.size, 0) + file.size > maxTotal) { problems.push(file.name + '：合計' + mb(maxTotal) + 'を超えるため追加できません。'); continue; }
       files.push(file);
     }

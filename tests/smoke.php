@@ -110,9 +110,17 @@ try {
   [$s, $body] = request('index.php', $form([], []));
   check('missing file is rejected', $s === 422 && strpos($body, '図面ファイルを添付してください') !== false);
   $tooMany = [];
-  for ($i = 0; $i < 11; $i++) $tooMany["drawing[$i]"] = file_of("p$i.pdf", $pdf);
+  for ($i = 0; $i < 11; $i++) $tooMany["drawing[$i]"] = $i % 2 ? file_of("p$i.jww", $jww) : file_of("p$i.pdf", $pdf);
   [$s, $body] = request('index.php', $form([], $tooMany));
-  check('more than 10 PDFs are rejected', $s === 422 && strpos($body, '10ファイルまで') !== false);
+  check('more than 10 files in total are rejected', $s === 422 && strpos($body, '合計10個まで') !== false);
+  $ten = array_slice($tooMany, 0, 10, true);
+  [$s] = request('index.php', $form([], $ten));
+  check('10 files in total are accepted', $s === 303);
+  [$s, $body] = request('index.php', $form([], ['drawing[0]' => file_of('big.pdf', '%PDF-' . str_repeat('x', 8 * 1024 * 1024))]));
+  check('file over 8MB is rejected', $s === 422 && strpos($body, '1つあたり8MBまで') !== false);
+  [, $body] = request('index.php');
+  check('limits are shown on the form', strpos($body, '合計10個まで') !== false && strpos($body, '1ファイル8MBまで') !== false &&
+    strpos($body, '合計80MBまで') !== false);
 
   write_env(['MIN_FORM_SECONDS=0', 'RATE_LIMIT_PER_HOUR=1000', 'TURNSTILE_SECRET=2x0000000000000000000000000000000AA']);
   [$s, $body] = request('index.php', $form());

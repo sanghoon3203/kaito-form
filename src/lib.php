@@ -3,8 +3,9 @@
 // PHP 7.4+ と curl・mbstring・openssl 拡張が必要。設定は .env(public の一つ上)から読む。.env.example を参照。
 declare(strict_types=1);
 
-const MAX_FILE_SIZE = 50 * 1024 * 1024; // 1ファイルの上限。Apps Script が中身を検査できる大きさ(50MB)
-const MAX_FILES_PER_TYPE = 10;
+const MAX_FILE_SIZE = 8 * 1024 * 1024;   // 1ファイルの上限
+const MAX_TOTAL_SIZE = 80 * 1024 * 1024; // 1回の送信で添付できる合計
+const MAX_FILES = 10;                    // PDF と JWW を合わせた個数
 const FILE_SIGNATURES = ['pdf' => '%PDF-', 'jww' => 'JwwData.']; // ファイル先頭の決まった文字列
 const HEATING_TYPES = ['放熱器', 'AC', 'ﾌｧﾝｺﾝﾍﾞｸﾀｰ']; // 案件基本情報「床下暖房種別」のプルダウンと同じ表記
 const FORM_TOKEN_TTL = 2 * 3600;
@@ -172,7 +173,8 @@ function ini_bytes(string $key): int {
 }
 
 function max_file_size(): int { return min(MAX_FILE_SIZE, ini_bytes('upload_max_filesize') ?: MAX_FILE_SIZE); }
-function max_total_size(): int { return ini_bytes('post_max_size') ?: PHP_INT_MAX; }
+// php.ini の設定がこれより小さい場合は、そちらに合わせる(超えると PHP が受け取れないため)
+function max_total_size(): int { return min(MAX_TOTAL_SIZE, ini_bytes('post_max_size') ?: MAX_TOTAL_SIZE); }
 
 function format_mb(int $bytes): string { return rtrim(rtrim(number_format($bytes / 1024 / 1024, 1), '0'), '.') . 'MB'; }
 
@@ -206,7 +208,6 @@ function validate_files($upload): array {
   $files = [];
   $errors = [];
   if (!is_array($upload) || !is_array($upload['name'] ?? null)) return [[], ['図面ファイルを添付してください。']];
-  $count = ['pdf' => 0, 'jww' => 0];
   foreach ($upload['name'] as $i => $name) {
     $error = $upload['error'][$i] ?? UPLOAD_ERR_NO_FILE;
     if ($error === UPLOAD_ERR_NO_FILE) continue;
@@ -224,11 +225,11 @@ function validate_files($upload): array {
     // 拡張子だけ .pdf / .jww に変えた別の形式のファイル(実行ファイルなど)を受け付けない
     $head = (string) file_get_contents($tmp, false, null, 0, strlen(FILE_SIGNATURES[$ext]));
     if ($head !== FILE_SIGNATURES[$ext]) { $errors[] = $name . ' は' . strtoupper($ext) . 'ファイルの形式ではありません。'; continue; }
-    $count[$ext]++;
     $files[] = ['name' => $name, 'size' => $size, 'tmp' => $tmp, 'type' => $ext === 'pdf' ? 'application/pdf' : 'application/octet-stream'];
   }
   if (!$files && !$errors) $errors[] = '図面ファイルを添付してください。';
-  if ($count['pdf'] > MAX_FILES_PER_TYPE || $count['jww'] > MAX_FILES_PER_TYPE) $errors[] = 'PDFとJWWは、それぞれ10ファイルまで添付できます。';
+  if (count($files) > MAX_FILES) $errors[] = 'ファイルは合計' . MAX_FILES . '個まで添付できます。';
+  if (array_sum(array_column($files, 'size')) > max_total_size()) $errors[] = 'ファイルは合計' . format_mb(max_total_size()) . 'まで添付できます。';
   return [$files, array_values(array_unique($errors))];
 }
 

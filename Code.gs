@@ -82,7 +82,7 @@ function appendCaseRow(props, data, folderUrl) {
 
 function prepareDriveUploads(props, data) {
   const root = DriveApp.getFolderById(idProperty(props, 'ROOT_FOLDER_ID'));
-  if (data.files.some(file => !(file.size > 0 && file.size <= 50 * 1024 * 1024))) return { ok: false }; // api.php と同じ上限
+  if (data.files.some(file => !(file.size > 0 && file.size <= 8 * 1024 * 1024))) return { ok: false }; // src/lib.php と同じ上限(1ファイル8MB)
   const company = data.company.replace(/[\/\\\x00-\x1f]/g, ' ').trim();
   if (!company) return { ok: false };
   const lock = LockService.getScriptLock();

@@ -110,6 +110,19 @@ try {
   [$s, $body] = request('index.php', $form());
   check('rate limit per IP', $s === 422 && strpos($body, '上限') !== false);
 
+  write_env(['MIN_FORM_SECONDS=0', 'RATE_LIMIT_PER_HOUR=1000', 'GLOBAL_LIMIT_PER_HOUR=1']);
+  [$s, $body] = request('index.php', $form());
+  check('global hourly cap on submissions', $s === 422 && strpos($body, '混み合って') !== false);
+  write_env(['MIN_FORM_SECONDS=0', 'RATE_LIMIT_PER_HOUR=1000', 'GLOBAL_LIMIT_PER_HOUR=1000', 'GLOBAL_UPLOAD_MB_PER_HOUR=0']);
+  [$s, $body] = request('index.php', $form());
+  check('global hourly cap on upload volume', $s === 422 && strpos($body, '混み合って') !== false);
+
+  require $root . '/src/lib.php';
+  check('IPv6 addresses in one /64 share a limit', client_key('2001:db8:1:2::1') === client_key('2001:db8:1:2:ffff::9') &&
+    client_key('2001:db8:1:2::1') !== client_key('2001:db8:1:3::1'));
+  check('IPv4 and IPv4-mapped IPv6 are counted per address', client_key('::ffff:203.0.113.5') === client_key('203.0.113.5') &&
+    client_key('203.0.113.5') !== client_key('203.0.113.6'));
+
   [$s, $body] = request('complete.php');
   check('complete page renders', $s === 200 && strpos($body, '受け付けました') !== false && stripos($body, '<script') === false);
 } finally {

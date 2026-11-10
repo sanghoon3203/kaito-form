@@ -82,21 +82,31 @@ function token_used($token): bool {
   return is_string($token) && preg_match('/^\d{10}\.([0-9a-f]{24})\./', $token, $m) && is_file(data_dir() . '/used-' . $m[1]);
 }
 
-/** 同じ IP からの送信回数を1時間あたりで制限する。ponytail: ファイル1つで管理。件数が多くなったら DB へ */
-function rate_limited(string $ip): bool {
-  $limit = env_int('RATE_LIMIT_PER_HOUR', 5);
-  $file = data_dir() . '/rate-' . hash('sha256', $ip) . '.json';
-  $fp = fopen($file, 'c+');
+/**
+ * 直近1時間の合計に $amount を足しても $limit 以内なら、記録して true を返す。
+ * ponytail: キーごとにファイル1つで管理。受付が多くなったら DB へ
+ */
+function within_hourly_limit(string $key, int $limit, int $amount = 1): bool {
+  $fp = fopen(data_dir() . '/rate-' . hash('sha256', $key) . '.json', 'c+');
   if (!$fp) throw new RuntimeException('Cannot write data dir');
   flock($fp, LOCK_EX);
-  $times = array_filter((array) json_decode((string) stream_get_contents($fp), true), function ($t) {
-    return is_int($t) && $t > time() - 3600;
-  });
-  $over = count($times) >= $limit;
-  if (!$over) $times[] = time();
-  ftruncate($fp, 0); rewind($fp); fwrite($fp, json_encode(array_values($times)));
+  $entries = array_values(array_filter((array) json_decode((string) stream_get_contents($fp), true), function ($e) {
+    return is_array($e) && is_int($e[0] ?? null) && is_int($e[1] ?? null) && $e[0] > time() - 3600;
+  }));
+  $ok = array_sum(array_column($entries, 1)) + $amount <= $limit;
+  if ($ok) $entries[] = [time(), $amount];
+  ftruncate($fp, 0); rewind($fp); fwrite($fp, json_encode($entries));
   flock($fp, LOCK_UN); fclose($fp);
-  return $over;
+  return $ok;
+}
+
+/** 送信元の単位。IPv6 は利用者が /64 の中でいくらでもアドレスを変えられるので、/64 でまとめる */
+function client_key(string $ip): string {
+  $packed = @inet_pton($ip);
+  if ($packed !== false && strlen($packed) === 16 && substr($packed, 0, 12) !== str_repeat("\0", 10) . "\xff\xff") {
+    return 'ip6:' . bin2hex(substr($packed, 0, 8));
+  }
+  return 'ip:' . ($packed !== false && strlen($packed) === 16 ? inet_ntop(substr($packed, 12)) : $ip);
 }
 
 // ---- 入力のチェック ----
@@ -258,7 +268,16 @@ function handle_post(array $post, $upload, string $ip): array {
   if ($errors) return $errors;
   $tokenError = check_form_token($post['token'] ?? null);
   if ($tokenError !== null) return [$tokenError];
-  if (rate_limited($ip)) return ['送信回数の上限に達しました。しばらく時間をおいてお試しください。'];
+  if (!within_hourly_limit(client_key($ip), env_int('RATE_LIMIT_PER_HOUR', 5))) {
+    return ['送信回数の上限に達しました。しばらく時間をおいてお試しください。'];
+  }
+  // 送信元を変えながら大量に送られた場合に備え、全体の件数とアップロード量にも1時間あたりの上限を置く
+  $bytes = (int) array_sum(array_column($files, 'size'));
+  if (!within_hourly_limit('global-count', env_int('GLOBAL_LIMIT_PER_HOUR', 60)) ||
+      !within_hourly_limit('global-bytes', env_int('GLOBAL_UPLOAD_MB_PER_HOUR', 2048) * 1024 * 1024, $bytes)) {
+    error_log('kaito-form: global hourly limit reached');
+    return ['現在、受付が混み合っております。しばらく時間をおいてお試しください。'];
+  }
   submit_receipt($fields, $files);
   return [];
 }

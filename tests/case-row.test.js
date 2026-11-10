@@ -124,4 +124,14 @@ s = fakeSheet(HEADERS, []);
 run(s, { ...DATA, warnings: ['b.pdf：/EmbeddedFiles'] });
 assert.ok(s.cells[1][col('備考')].includes('【要注意】b.pdf：/EmbeddedFiles'));
 
+// 7. Script Properties には ID の代わりに URL を貼ってもよい
+const props = v => ({ getProperty: () => v });
+const ids = load();
+assert.strictEqual(ids.idProperty(props('https://drive.google.com/drive/folders/0AAMhUhWwqKARUk9PVA'), 'X'), '0AAMhUhWwqKARUk9PVA');
+assert.strictEqual(ids.idProperty(props('https://drive.google.com/drive/u/0/folders/1AbCdEfGhIjK_lm-no?usp=sharing'), 'X'), '1AbCdEfGhIjK_lm-no');
+assert.strictEqual(ids.idProperty(props('https://docs.google.com/spreadsheets/d/19ZOo675Q2fELHln_wrCCKM1cYgfe1E-VWF-Td-xKgBc/edit?gid=0#gid=0'), 'X'),
+  '19ZOo675Q2fELHln_wrCCKM1cYgfe1E-VWF-Td-xKgBc');
+assert.strictEqual(ids.idProperty(props(' 19ZOo675Q2fELHln_wrCCKM1cYgfe1E-VWF-Td-xKgBc '), 'X'), '19ZOo675Q2fELHln_wrCCKM1cYgfe1E-VWF-Td-xKgBc');
+assert.strictEqual(ids.idProperty(props(null), 'X'), '');
+
 console.log('ok: case row tests passed');

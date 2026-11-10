@@ -83,6 +83,21 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--accent);
 .done{max-width:680px;margin:0 auto;text-align:center;padding:0 22px}
 .done h2{font-size:32px;line-height:1.3;margin:0 0 16px}
 .done p{color:var(--sub);margin:0 0 32px}
+.visually-hidden{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
+.file-box{border:1px dashed var(--line);border-radius:12px;padding:16px}
+.file-add{display:inline-flex;align-items:center;gap:4px;margin:0;padding:8px 18px;border-radius:999px;background:var(--soft);font-size:14px;font-weight:500;cursor:pointer}
+.file-add:hover{background:#ebebef}
+#drawing-picker:focus-visible + .file-add{outline:3px solid var(--accent);outline-offset:2px}
+.file-list{list-style:none;margin:12px 0 0;padding:0}
+.file-list:empty{display:none}
+.file-list li{display:flex;align-items:center;gap:12px;padding:10px 4px 10px 12px;border-top:1px solid var(--line);font-size:14px}
+.file-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.file-size{color:var(--sub);font-size:12px;white-space:nowrap}
+.file-remove{flex:none;width:32px;height:32px;border:0;border-radius:50%;background:transparent;color:var(--sub);font-size:20px;line-height:1;cursor:pointer}
+.file-remove:hover{background:var(--soft);color:var(--text)}
+.file-remove:focus-visible{outline:3px solid var(--accent);outline-offset:1px}
+.file-error{margin:8px 0 0;color:var(--error);font-size:13px;white-space:pre-line}
+.file-error:empty{display:none}
 .cf-turnstile{display:flex;justify-content:center;min-height:65px;margin-bottom:20px}
 .link-button{display:inline-block;text-decoration:none;font-weight:700;color:var(--text);background:var(--accent);border-radius:999px;padding:12px 32px}
 

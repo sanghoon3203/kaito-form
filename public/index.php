@@ -74,7 +74,19 @@ page_start('お問い合わせ | BAQOOL サポート');
 
     <div class="section">
       <h3>図面ファイル</h3>
-      <div class="field"><label for="drawing">図面ファイル<span class="req">必須</span></label><input id="drawing" name="drawing[]" type="file" accept="application/pdf,.pdf,.jww" multiple required aria-describedby="drawing-hint"><p class="hint" id="drawing-hint">PDFとJWWをそれぞれ10ファイルまで、1ファイル<?= h(format_mb(max_file_size())) ?>まで、合計<?= h(format_mb(max_total_size())) ?>まで添付できます。</p></div>
+      <div class="field">
+        <label for="drawing" id="drawing-label">図面ファイル<span class="req">必須</span></label>
+        <?php /* 送信されるのはこの入力欄。JavaScript が動くときは隠し、下の「ファイルを追加」と一覧で選んだファイルをここに入れる */ ?>
+        <input id="drawing" name="drawing[]" type="file" accept="application/pdf,.pdf,.jww" multiple required aria-describedby="drawing-hint"
+          data-max-size="<?= max_file_size() ?>" data-max-total="<?= max_total_size() ?>">
+        <div class="file-box" id="drawing-box" hidden>
+          <input class="visually-hidden" id="drawing-picker" type="file" accept="application/pdf,.pdf,.jww" multiple aria-describedby="drawing-hint">
+          <label class="file-add" for="drawing-picker">＋ ファイルを追加</label>
+          <ul class="file-list" id="drawing-list" aria-label="添付するファイル"></ul>
+          <p class="file-error" id="drawing-error" role="alert"></p>
+        </div>
+        <p class="hint" id="drawing-hint">PDFとJWWをそれぞれ10ファイルまで、1ファイル<?= h(format_mb(max_file_size())) ?>まで、合計<?= h(format_mb(max_total_size())) ?>まで添付できます。</p>
+      </div>
     </div>
 
     <div class="submit">
@@ -86,5 +98,80 @@ page_start('お問い合わせ | BAQOOL サポート');
   </form>
 </main>
 <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
+<script nonce="<?= h(csp_nonce()) ?>">
+// 図面ファイルを1つずつ追加でき、一覧の × で外せるようにする。
+// JavaScript が動かないブラウザでは、元のファイル選択欄がそのまま使われる。
+(() => {
+  const real = document.getElementById('drawing');
+  const picker = document.getElementById('drawing-picker');
+  const list = document.getElementById('drawing-list');
+  const error = document.getElementById('drawing-error');
+  if (!real || !picker || typeof DataTransfer !== 'function') return;
+  const maxSize = Number(real.dataset.maxSize);
+  const maxTotal = Number(real.dataset.maxTotal);
+  const maxPerType = 10;
+  let files = [];
+
+  document.getElementById('drawing-box').hidden = false;
+  real.hidden = true;
+  real.required = false;
+  document.getElementById('drawing-label').htmlFor = 'drawing-picker';
+
+  const mb = bytes => (bytes / 1024 / 1024 >= 1 ? (bytes / 1024 / 1024).toFixed(1) + 'MB' : Math.max(1, Math.round(bytes / 1024)) + 'KB');
+  const type = file => (file.name.match(/\.(pdf|jww)$/i) || [])[1]?.toLowerCase();
+
+  function render() {
+    const dt = new DataTransfer();
+    files.forEach(file => dt.items.add(file));
+    real.files = dt.files; // 送信用の入力欄に反映する
+    list.replaceChildren(...files.map((file, i) => {
+      const item = document.createElement('li');
+      const name = document.createElement('span');
+      name.className = 'file-name';
+      name.textContent = file.name;
+      const size = document.createElement('span');
+      size.className = 'file-size';
+      size.textContent = mb(file.size);
+      const remove = document.createElement('button');
+      remove.type = 'button';
+      remove.className = 'file-remove';
+      remove.textContent = '×';
+      remove.setAttribute('aria-label', file.name + ' を一覧から外す');
+      remove.addEventListener('click', () => {
+        files.splice(i, 1);
+        error.textContent = '';
+        render();
+        (list.querySelectorAll('.file-remove')[Math.min(i, files.length - 1)] || picker).focus();
+      });
+      item.append(name, size, remove);
+      return item;
+    }));
+  }
+
+  picker.addEventListener('change', () => {
+    const problems = [];
+    for (const file of picker.files) {
+      const kind = type(file);
+      if (!kind) { problems.push(file.name + '：PDFまたはJWWファイルを選んでください。'); continue; }
+      if (file.size > maxSize) { problems.push(file.name + '：1ファイル' + mb(maxSize) + 'までです。'); continue; }
+      if (files.some(f => f.name === file.name && f.size === file.size)) { problems.push(file.name + '：すでに追加されています。'); continue; }
+      if (files.filter(f => type(f) === kind).length >= maxPerType) { problems.push(file.name + '：' + kind.toUpperCase() + 'は10ファイルまでです。'); continue; }
+      if (files.reduce((sum, f) => sum + f.size, 0) + file.size > maxTotal) { problems.push(file.name + '：合計' + mb(maxTotal) + 'を超えるため追加できません。'); continue; }
+      files.push(file);
+    }
+    picker.value = ''; // 同じファイルをもう一度選んでも change が起きるようにする
+    error.textContent = problems.join('\n');
+    render();
+  });
+
+  real.form.addEventListener('submit', event => {
+    if (!files.length) {
+      event.preventDefault();
+      error.textContent = '図面ファイルを追加してください。';
+      picker.focus();
+    }
+  });
+})();
+</script>
 <?php
 page_end();

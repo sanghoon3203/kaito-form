@@ -12,6 +12,14 @@ function doPost(e) {
   } catch(error) { console.error('Submission failed'); return output({ok:false}); }
 }
 
+// Script Properties の ID は、ブラウザのアドレス欄の URL をそのまま貼ってもよい
+// (…/folders/<ID> や …/spreadsheets/d/<ID>/edit から ID を取り出す)
+function idProperty(props, key) {
+  const value = String(props.getProperty(key) || '').trim();
+  const match = value.match(/\/(?:folders|d)\/([\w-]{10,})/);
+  return match ? match[1] : value;
+}
+
 const safeCell = value => { const s = String(value || ''); return /^[=+\-@\t\r]/.test(s) ? "'" + s : s; };
 
 // 案件基本情報に1行追加する。列は1行目のヘッダー名で探すので、列の追加や並べ替えがあっても正しい列に入る。
@@ -28,7 +36,7 @@ const CASE_COLUMNS = [
 const CASE_DATE_COLUMNS = ['着工予定日'];
 
 function appendCaseRow(props, data, folderUrl) {
-  const id = props.getProperty('CASE_SHEET_ID');
+  const id = idProperty(props, 'CASE_SHEET_ID');
   if (!id) return 'skipped';
   const sheet = SpreadsheetApp.openById(id).getSheetByName(props.getProperty('CASE_SHEET_NAME') || '案件基本情報');
   if (!sheet) throw new Error('Case sheet not found');
@@ -73,7 +81,7 @@ function appendCaseRow(props, data, folderUrl) {
 }
 
 function prepareDriveUploads(props, data) {
-  const root = DriveApp.getFolderById(props.getProperty('ROOT_FOLDER_ID'));
+  const root = DriveApp.getFolderById(idProperty(props, 'ROOT_FOLDER_ID'));
   if (data.files.some(file => !(file.size > 0 && file.size <= 50 * 1024 * 1024))) return { ok: false }; // api.php と同じ上限
   const company = data.company.replace(/[\/\\\x00-\x1f]/g, ' ').trim();
   if (!company) return { ok: false };
@@ -180,7 +188,7 @@ function saveUploadReceipt(props, data) {
   lock.waitLock(25000);
   let spreadsheetUrl, caseResult;
   try {
-    const sheet = SpreadsheetApp.openById(props.getProperty('SHEET_ID')).getSheets()[0];
+    const sheet = SpreadsheetApp.openById(idProperty(props, 'SHEET_ID')).getSheets()[0];
     const lastRow = sheet.getLastRow();
     const joinedLinks = fileLinks.join('\n');
     if (lastRow > 1 && sheet.getRange(2, 8, lastRow - 1, 1).createTextFinder(joinedLinks).matchEntireCell(true).findNext()) {
@@ -235,7 +243,7 @@ function setReceiptFileLinks(cell, text) {
 
 function repairReceiptSheetDisplay() {
   const props = PropertiesService.getScriptProperties();
-  const sheet = SpreadsheetApp.openById(props.getProperty('SHEET_ID')).getSheetByName('シート1');
+  const sheet = SpreadsheetApp.openById(idProperty(props, 'SHEET_ID')).getSheetByName('シート1');
   const widths = [148, 150, 112, 194, 104, 120, 222, 160, 139];
   widths.forEach((width, index) => sheet.setColumnWidth(index + 1, width));
   sheet.getRange('B2:D').setWrapStrategy(SpreadsheetApp.WrapStrategy.WRAP);

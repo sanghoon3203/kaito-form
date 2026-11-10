@@ -64,14 +64,19 @@ $form = function (array $override = [], ?array $files = null) use ($fields, $pdf
 try {
   [$s, $body, $h] = request('index.php');
   check('form page renders', $s === 200 && strpos($body, 'お問い合わせ') !== false && strpos($body, 'サポート') !== false);
+  $csp = $h['content-security-policy'] ?? '';
+  preg_match("/'nonce-([A-Za-z0-9+\/=]+)'/", $csp, $nonce);
   preg_match_all('/<script\b[^>]*>/i', $body, $scripts);
-  check('only script is Cloudflare Turnstile', count($scripts[0]) === 1 &&
+  check('scripts are only Turnstile and the nonce-tagged file list', count($scripts[0]) === 2 &&
     strpos($scripts[0][0], 'src="https://challenges.cloudflare.com/turnstile/v0/api.js"') !== false &&
+    isset($nonce[1]) && $scripts[0][1] === '<script nonce="' . $nonce[1] . '">' &&
     stripos($body, 'javascript:') === false && !preg_match('/\son[a-z]+=/i', $body));
   check('Turnstile widget has the site key', strpos($body, 'data-sitekey="1x00000000000000000000AA"') !== false);
-  $csp = $h['content-security-policy'] ?? '';
-  check('CSP allows scripts only from Cloudflare', strpos($csp, "default-src 'none'") !== false &&
-    strpos($csp, 'script-src https://challenges.cloudflare.com;') !== false);
+  check('CSP allows only Cloudflare and the nonce', strpos($csp, "default-src 'none'") !== false &&
+    preg_match("~script-src 'nonce-[A-Za-z0-9+/=]+' https://challenges\.cloudflare\.com;~", $csp) === 1);
+  [, , $h2] = request('index.php');
+  check('nonce changes on every request', ($h2['content-security-policy'] ?? '') !== $csp);
+  check('file input works without JavaScript too', strpos($body, 'name="drawing[]"') !== false && strpos($body, 'multiple required') !== false);
   check('old heading is gone', strpos($body, 'お申し込みフォーム') === false && strpos($body, 'お申し込み受付') === false);
 
   $post = $form();

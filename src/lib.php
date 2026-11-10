@@ -35,12 +35,18 @@ function env_int(string $key, int $default): int {
 
 function h($value): string { return htmlspecialchars((string) $value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); }
 
+/** このリクエストだけで使える値。ページ内の自前のスクリプトには、この値を付けたものだけ実行を許す */
+function csp_nonce(): string {
+  static $nonce = null;
+  return $nonce ?? ($nonce = base64_encode(random_bytes(16)));
+}
+
 function send_security_headers(): void {
   header('X-Content-Type-Options: nosniff');
   header('Referrer-Policy: no-referrer');
   header('X-Frame-Options: DENY');
-  // 読み込める JavaScript は Cloudflare Turnstile だけ。自前の JavaScript は使わない。フォントは Google Fonts から読む
-  header("Content-Security-Policy: default-src 'none'; script-src https://challenges.cloudflare.com; " .
+  // 実行できる JavaScript は、Cloudflare Turnstile と、nonce を付けたページ内のスクリプトだけ。フォントは Google Fonts から読む
+  header("Content-Security-Policy: default-src 'none'; script-src 'nonce-" . csp_nonce() . "' https://challenges.cloudflare.com; " .
     "frame-src https://challenges.cloudflare.com; style-src 'unsafe-inline' https://fonts.googleapis.com; " .
     "font-src https://fonts.gstatic.com; img-src data:; form-action 'self'; base-uri 'none'; frame-ancestors 'none'");
 }

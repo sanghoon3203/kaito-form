@@ -1,6 +1,6 @@
 # kaito-form
 
-BAQOOL サポートのお問い合わせフォームです。図面と案件の情報を受け付けます。サーバーは PHP だけで動きます。ブラウザで読み込む JavaScript は、Cloudflare Turnstile(ボット対策)だけです。
+BAQOOL サポートのお問い合わせフォームです。図面と案件の情報を受け付けます。サーバーは PHP だけで動きます。ブラウザで動く JavaScript は、Cloudflare Turnstile(ボット対策)と、図面ファイルの一覧(1つずつ追加し、× で外せる)だけです。一覧の JavaScript が動かないブラウザでは、通常のファイル選択欄が使われます。
 
 ## 全体の流れ
 
@@ -51,7 +51,7 @@ BAQOOL サポートのお問い合わせフォームです。図面と案件の�
 
 ## Apps Script(Code.gs)
 
-Google Apps Script のプロジェクトに `Code.gs` を貼り、ウェブアプリとしてデプロイします。Drive API(高度なサービス)を有効にしてください。Script Properties に次を設定します。
+Google Apps Script のプロジェクトに `Code.gs` を貼り、ウェブアプリとしてデプロイします。Drive API(高度なサービス)を有効にしてください。Script Properties に次を設定します。フォルダやスプレッドシートの ID の欄には、ブラウザのアドレス欄の URL をそのまま貼ってもかまいません。
 
 | キー | 内容 |
 |---|---|

@@ -117,7 +117,20 @@ try {
   [$s, $body] = request('index.php', $form());
   check('global hourly cap on upload volume', $s === 422 && strpos($body, '混み合って') !== false);
 
+  write_env(['RATE_LIMIT_PER_HOUR=2', 'CLIENT_UPLOAD_MB_PER_HOUR=1', 'GLOBAL_LIMIT_PER_HOUR=1000', 'GLOBAL_UPLOAD_MB_PER_HOUR=1000']);
   require $root . '/src/lib.php';
+  $ip = '198.51.100.7';
+  [$err] = reserve_quota($ip, 2 * 1024 * 1024, 'big');
+  check('per-client upload volume cap', $err !== null && strpos($err, '上限') !== false);
+  [$e1] = reserve_quota($ip, 1000, 'a');
+  [$e2, $keys] = reserve_quota($ip, 1000, 'b');
+  check('rejected requests do not use up quota', $e1 === null && $e2 === null, "$e1 / $e2");
+  [$e3] = reserve_quota($ip, 1000, 'c');
+  check('per-client count still applies', $e3 !== null);
+  foreach ($keys as $key) release($key, 'b');
+  [$e4] = reserve_quota($ip, 1000, 'd');
+  check('failed submissions are refunded', $e4 === null, (string) $e4);
+
   check('IPv6 addresses in one /64 share a limit', client_key('2001:db8:1:2::1') === client_key('2001:db8:1:2:ffff::9') &&
     client_key('2001:db8:1:2::1') !== client_key('2001:db8:1:3::1'));
   check('IPv4 and IPv4-mapped IPv6 are counted per address', client_key('::ffff:203.0.113.5') === client_key('203.0.113.5') &&

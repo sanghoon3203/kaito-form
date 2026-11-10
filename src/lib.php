@@ -83,21 +83,63 @@ function token_used($token): bool {
 }
 
 /**
- * 直近1時間の合計に $amount を足しても $limit 以内なら、記録して true を返す。
+ * 直近1時間の記録をロックして読み、$change で書き換える。記録は [時刻, 量, 受付ID] の並び。
  * ponytail: キーごとにファイル1つで管理。受付が多くなったら DB へ
  */
-function within_hourly_limit(string $key, int $limit, int $amount = 1): bool {
+function update_hourly(string $key, callable $change) {
   $fp = fopen(data_dir() . '/rate-' . hash('sha256', $key) . '.json', 'c+');
   if (!$fp) throw new RuntimeException('Cannot write data dir');
   flock($fp, LOCK_EX);
   $entries = array_values(array_filter((array) json_decode((string) stream_get_contents($fp), true), function ($e) {
-    return is_array($e) && is_int($e[0] ?? null) && is_int($e[1] ?? null) && $e[0] > time() - 3600;
+    return is_array($e) && is_int($e[0] ?? null) && is_int($e[1] ?? null) && is_string($e[2] ?? null) && $e[0] > time() - 3600;
   }));
-  $ok = array_sum(array_column($entries, 1)) + $amount <= $limit;
-  if ($ok) $entries[] = [time(), $amount];
-  ftruncate($fp, 0); rewind($fp); fwrite($fp, json_encode($entries));
+  [$entries, $result] = $change($entries);
+  ftruncate($fp, 0); rewind($fp); fwrite($fp, json_encode(array_values($entries)));
   flock($fp, LOCK_UN); fclose($fp);
-  return $ok;
+  return $result;
+}
+
+/** 合計が $limit 以内に収まるときだけ $amount を予約する */
+function reserve(string $key, int $limit, int $amount, string $id): bool {
+  return update_hourly($key, function (array $entries) use ($limit, $amount, $id) {
+    $ok = array_sum(array_column($entries, 1)) + $amount <= $limit;
+    if ($ok) $entries[] = [time(), $amount, $id];
+    return [$entries, $ok];
+  });
+}
+
+function release(string $key, string $id): void {
+  update_hourly($key, function (array $entries) use ($id) {
+    return [array_filter($entries, function ($e) use ($id) { return $e[2] !== $id; }), null];
+  });
+}
+
+/**
+ * 送信回数と容量の上限をまとめて予約する。どれか1つでも超えたら、予約済みの分を戻してエラーを返す。
+ * @return array{0: ?string, 1: string[]} エラーメッセージ(なければ null)と予約したキー
+ */
+function reserve_quota(string $ip, int $bytes, string $id): array {
+  $mb = 1024 * 1024;
+  $client = client_key($ip);
+  $busy = '現在、受付が混み合っております。しばらく時間をおいてお試しください。';
+  $tooMany = '送信回数の上限に達しました。しばらく時間をおいてお試しください。';
+  // 全体の上限は、1つの送信元の上限より十分大きくしておく。小さいと、少数の送信元だけで全体を止められてしまう
+  $limits = [
+    [$client, env_int('RATE_LIMIT_PER_HOUR', 5), 1, $tooMany],
+    ['bytes:' . $client, env_int('CLIENT_UPLOAD_MB_PER_HOUR', 300) * $mb, $bytes, $tooMany],
+    ['global-count', env_int('GLOBAL_LIMIT_PER_HOUR', 200), 1, $busy],
+    ['global-bytes', env_int('GLOBAL_UPLOAD_MB_PER_HOUR', 10240) * $mb, $bytes, $busy],
+  ];
+  $reserved = [];
+  foreach ($limits as [$key, $limit, $amount, $message]) {
+    if (!reserve($key, $limit, $amount, $id)) {
+      foreach ($reserved as $done) release($done, $id);
+      if ($message === $busy) error_log('kaito-form: global hourly limit reached');
+      return [$message, []];
+    }
+    $reserved[] = $key;
+  }
+  return [null, $reserved];
 }
 
 /** 送信元の単位。IPv6 は利用者が /64 の中でいくらでもアドレスを変えられるので、/64 でまとめる */
@@ -268,16 +310,15 @@ function handle_post(array $post, $upload, string $ip): array {
   if ($errors) return $errors;
   $tokenError = check_form_token($post['token'] ?? null);
   if ($tokenError !== null) return [$tokenError];
-  if (!within_hourly_limit(client_key($ip), env_int('RATE_LIMIT_PER_HOUR', 5))) {
-    return ['送信回数の上限に達しました。しばらく時間をおいてお試しください。'];
+  // 送信元ごとと全体の、件数とアップロード量の上限(1時間あたり)
+  $id = bin2hex(random_bytes(8));
+  [$quotaError, $reserved] = reserve_quota($ip, (int) array_sum(array_column($files, 'size')), $id);
+  if ($quotaError !== null) return [$quotaError];
+  try {
+    submit_receipt($fields, $files);
+  } catch (Throwable $e) {
+    foreach ($reserved as $key) release($key, $id); // 受付できなかった分は上限に数えない
+    throw $e;
   }
-  // 送信元を変えながら大量に送られた場合に備え、全体の件数とアップロード量にも1時間あたりの上限を置く
-  $bytes = (int) array_sum(array_column($files, 'size'));
-  if (!within_hourly_limit('global-count', env_int('GLOBAL_LIMIT_PER_HOUR', 60)) ||
-      !within_hourly_limit('global-bytes', env_int('GLOBAL_UPLOAD_MB_PER_HOUR', 2048) * 1024 * 1024, $bytes)) {
-    error_log('kaito-form: global hourly limit reached');
-    return ['現在、受付が混み合っております。しばらく時間をおいてお試しください。'];
-  }
-  submit_receipt($fields, $files);
   return [];
 }

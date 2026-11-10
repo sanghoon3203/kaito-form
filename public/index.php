@@ -33,7 +33,7 @@ page_start('お問い合わせ | BAQOOL サポート');
 ?>
 <section class="intro">
   <h2>お問い合わせ</h2>
-  <p>ご不明な点やご相談がございましたら、下記フォームよりお気軽にお問い合わせください。<br>内容を確認の上、担当者よりご連絡させていただきます。</p>
+  <p>物件へのBAQOOLの導入をご検討の方は、図面とご連絡先を添えて、下記フォームよりお問い合わせください。<br>内容を確認の上、担当者よりご連絡させていただきます。</p>
 </section>
 <main id="form">
   <form class="card" method="post" action="" enctype="multipart/form-data">

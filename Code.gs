@@ -14,45 +14,61 @@ function doPost(e) {
 
 const safeCell = value => { const s = String(value || ''); return /^[=+\-@\t\r]/.test(s) ? "'" + s : s; };
 
-// 案件基本情報に1行追加する。書くのは C 顧客名, D 顧客支店名, G 案件名, H 案件住所, K 床下暖房種別,
-// L 備考, P 着工予定日, Q 完工予定日 だけ。E/F/W などの自動列には値を書かず、直前の行に数式があれば同じ数式を入れる。
-// プルダウンの入力規則で拒否された値は、空欄にして備考へ回す。
+// 案件基本情報に1行追加する。列は1行目のヘッダー名で探すので、列の追加や並べ替えがあっても正しい列に入る。
+// 書くのは下の CASE_COLUMNS と「備考」だけ。顧客住所(自動)などの自動列には値を書かず、直前の行に数式があれば同じ数式を入れる。
+// ヘッダーが見つからない値や、プルダウンの入力規則で拒否された値は、備考へ回す。
+const CASE_COLUMNS = [
+  ['顧客名', data => data.company],
+  ['顧客支店名', data => data.branch],
+  ['案件名', data => data.projectName],
+  ['案件住所', data => data.projectAddress],
+  ['床下暖房種別', data => data.heating],
+  ['着工予定日', data => data.start],
+  ['完工予定日', data => data.finish],
+];
+const CASE_DATE_COLUMNS = ['着工予定日', '完工予定日'];
+
 function appendCaseRow(props, data, folderUrl) {
   const id = props.getProperty('CASE_SHEET_ID');
   if (!id) return 'skipped';
   const sheet = SpreadsheetApp.openById(id).getSheetByName(props.getProperty('CASE_SHEET_NAME') || '案件基本情報');
   if (!sheet) throw new Error('Case sheet not found');
+  const lastColumn = sheet.getLastColumn();
+  const headers = sheet.getRange(1, 1, 1, lastColumn).getValues()[0].map(h => String(h).replace(/[\s　]/g, ''));
+  const colOf = name => headers.indexOf(name) + 1; // 見つからなければ 0
+  if (!colOf('備考')) throw new Error('備考 column not found');
+
   const maxRows = sheet.getMaxRows();
   const lastIn = col => {
+    if (!col) return 1;
     const bottom = sheet.getRange(maxRows, col);
     return bottom.getValue() !== '' ? maxRows : bottom.getNextDataCell(SpreadsheetApp.Direction.UP).getRow();
   };
-  const last = Math.max(lastIn(1), lastIn(3), lastIn(7)); // 案件番号・顧客名・案件名
+  const last = Math.max(lastIn(colOf('案件番号')), lastIn(colOf('顧客名')), lastIn(colOf('案件名')));
   if (last >= maxRows) sheet.insertRowAfter(last);
   const row = last + 1;
-  const formulas = sheet.getRange(last, 1, 1, sheet.getLastColumn()).getFormulasR1C1()[0];
-  formulas.forEach((formula, i) => { if (formula && last > 1) sheet.getRange(row, i + 1).setFormulaR1C1(formula); });
+  if (last > 1) {
+    const formulas = sheet.getRange(last, 1, 1, lastColumn).getFormulasR1C1()[0];
+    formulas.forEach((formula, i) => { if (formula) sheet.getRange(row, i + 1).setFormulaR1C1(formula); });
+  }
 
-  const toDate = s => { if (!s) return ''; const [y, m, d] = s.split('-').map(Number); return new Date(y, m - 1, d); };
-  const rejected = [];
-  const put = (col, value, label) => {
-    if (value === '' || value == null) return;
-    try { sheet.getRange(row, col).setValue(value); } catch (error) { rejected.push(label + '：' + value); }
-  };
-  put(3, safeCell(data.company), '顧客名');
-  put(4, safeCell(data.branch), '顧客支店名');
-  put(7, safeCell(data.projectName), '案件名');
-  put(8, safeCell(data.projectAddress), '案件住所');
-  put(11, safeCell(data.heating), '床下暖房種別');
-  put(16, toDate(data.start), '着工予定日');
-  put(17, toDate(data.finish), '完工予定日');
+  const toDate = s => { const [y, m, d] = s.split('-').map(Number); return new Date(y, m - 1, d); };
+  const leftover = [];
+  CASE_COLUMNS.forEach(([name, pick]) => {
+    const text = String(pick(data) || '').trim();
+    if (!text) return;
+    const col = colOf(name);
+    if (!col) { leftover.push(name + '：' + text); return; }
+    const value = CASE_DATE_COLUMNS.includes(name) ? toDate(text) : safeCell(text);
+    try { sheet.getRange(row, col).setValue(value); } catch (error) { leftover.push(name + '：' + text); }
+  });
   const memo = [
     '[フォーム受付 ' + Utilities.formatDate(new Date(), 'Asia/Tokyo', 'yyyy/MM/dd') + '] 担当：' + data.contact + '（' + data.email + '）',
     '図面：' + folderUrl,
-    ...rejected,
+    ...leftover,
     data.note || '',
   ].filter(Boolean).join('\n');
-  sheet.getRange(row, 12).setValue(safeCell(memo));
+  sheet.getRange(row, colOf('備考')).setValue(safeCell(memo));
   return 'row ' + row;
 }
 

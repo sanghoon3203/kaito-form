@@ -24,9 +24,8 @@ const CASE_COLUMNS = [
   ['案件住所', data => data.projectAddress],
   ['床下暖房種別', data => data.heating],
   ['着工予定日', data => data.start],
-  ['完工予定日', data => data.finish],
 ];
-const CASE_DATE_COLUMNS = ['着工予定日', '完工予定日'];
+const CASE_DATE_COLUMNS = ['着工予定日'];
 
 function appendCaseRow(props, data, folderUrl) {
   const id = props.getProperty('CASE_SHEET_ID');
@@ -222,7 +221,6 @@ function notifyReceipt(data, filenames, folderUrl, spreadsheetUrl, caseResult) {
     '案件住所　' + oneLine(data.projectAddress),
     '床下暖房種別　' + (oneLine(data.heating) || '未定'),
     '着工予定日　' + (oneLine(data.start) || '未定'),
-    '工事完了予定日　' + (oneLine(data.finish) || '未定'),
     '',
     '添付ファイル（' + filenames.length + '件）',
     ...filenames.map(name => '・' + oneLine(name)),

@@ -39,7 +39,7 @@ function run(sheet, data) {
 const HEADERS = ['案件番号', 'ステータス', '顧客名', '顧客支店名', '顧客住所（自動）', '顧客電話番号（自動）', '案件名', '案件住所',
   '取引種別', '営業担当', '床下暖房種別', '備考', '契約金額（税抜）', '契約金額（税込）', '契約日', '着工予定日', '完工予定日'];
 const DATA = { company: '=テスト工務店', branch: '大阪支店', contact: '山田', email: 'y@example.com', projectName: '山田様邸',
-  projectAddress: '大阪市1-2-3', heating: 'AC', start: '2026-12-01', finish: '', note: '至急' };
+  projectAddress: '大阪市1-2-3', heating: 'AC', start: '2026-12-01', finish: '2026-12-20', note: '至急' };
 
 // 1. 通常: ヘッダー名どおりの列に入り、自動列は数式をコピーする
 let s = fakeSheet(HEADERS, [['B25-001', '受注', 'A社', '', '', '', '既存案件']], { formulas: { '2,5': '=VLOOKUP(R[0]C[-2],x,2,0)' } });
@@ -51,7 +51,7 @@ assert.strictEqual(row[col('顧客支店名')], '大阪支店');
 assert.strictEqual(row[col('案件名')], '山田様邸');
 assert.strictEqual(row[col('床下暖房種別')], 'AC');
 assert.ok(row[col('着工予定日')] instanceof Date || Object.prototype.toString.call(row[col('着工予定日')]) === '[object Date]');
-assert.strictEqual(row[col('完工予定日')], undefined, 'empty date is left blank');
+assert.strictEqual(row[col('完工予定日')], undefined, '完工予定日 is no longer written');
 assert.ok(row[col('備考')].includes('担当：山田（y@example.com）') && row[col('備考')].endsWith('至急'));
 assert.strictEqual(row[col('顧客住所（自動）')], undefined, 'auto column gets no value');
 assert.strictEqual(s.formulaCells['3,5'], '=VLOOKUP(R[0]C[-2],x,2,0)', 'auto column formula is copied');

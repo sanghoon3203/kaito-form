@@ -110,7 +110,7 @@ function text_field(array $data, string $name, int $max): ?string {
 
 function validate_fields(array $data): ?array {
   $limits = ['company' => 100, 'branch' => 100, 'contact' => 100, 'email' => 254, 'projectName' => 200,
-    'projectAddress' => 200, 'heating' => 20, 'start' => 10, 'finish' => 10, 'note' => 1000];
+    'projectAddress' => 200, 'heating' => 20, 'start' => 10, 'note' => 1000];
   $fields = [];
   foreach ($limits as $name => $max) {
     $value = text_field($data, $name, $max);
@@ -121,8 +121,7 @@ function validate_fields(array $data): ?array {
   if ($fields['company'] === '' || $fields['contact'] === '' || $fields['projectName'] === '' ||
       $fields['projectAddress'] === '' || !filter_var($fields['email'], FILTER_VALIDATE_EMAIL) ||
       ($fields['heating'] !== '' && !in_array($fields['heating'], HEATING_TYPES, true)) ||
-      !$date($fields['start']) || !$date($fields['finish']) ||
-      ($fields['start'] !== '' && $fields['finish'] !== '' && $fields['finish'] < $fields['start'])) return null;
+      !$date($fields['start'])) return null;
   return $fields;
 }
 

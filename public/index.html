@@ -25,7 +25,7 @@
       <div class="field"><label for="projectName">案件名<span class="required">必須</span></label><input id="projectName" name="projectName" maxlength="200" required aria-describedby="projectName-hint"><p class="hint" id="projectName-hint">例：〇〇様邸 新築工事</p></div>
       <div class="field"><label for="projectAddress">案件住所<span class="required">必須</span></label><input id="projectAddress" name="projectAddress" maxlength="200" required></div>
       <div class="field"><label for="heating">床下暖房種別</label><select id="heating" name="heating"><option value="">未定</option><option value="放熱器">放熱器</option><option value="AC">AC</option><option value="ﾌｧﾝｺﾝﾍﾞｸﾀｰ">ファンコンベクター</option></select></div>
-      <div class="grid"><div class="field"><label for="start">着工予定日</label><input id="start" name="start" type="date"></div><div class="field"><label for="finish">工事完了予定日</label><input id="finish" name="finish" type="date"></div></div>
+      <div class="field"><label for="start">着工予定日</label><input id="start" name="start" type="date"></div>
       <div class="field"><label for="note">備考</label><textarea id="note" name="note" maxlength="1000"></textarea></div>
       <hr>
       <div class="field"><label for="drawing">図面ファイル<span class="required">必須</span></label><input id="drawing" name="drawing" type="file" accept="application/pdf,.pdf,.jww" multiple required aria-describedby="drawing-hint"><p class="hint" id="drawing-hint">PDFとJWWをそれぞれ10ファイルまで添付できます。</p></div>
@@ -85,14 +85,11 @@ form.addEventListener('submit', async event => {
         files.filter(file => /\.jww$/i.test(file.name)).length > 10) {
       throw new Error('PDFとJWWは、それぞれ10ファイルまで添付できます。');
     }
-    if (values.get('start') && values.get('finish') && values.get('finish') < values.get('start')) {
-      throw new Error('工事完了予定日は着工予定日以降の日付を選択してください。');
-    }
     if (!pending) {
       const token = values.get('cf-turnstile-response');
       if (!token) throw new Error('「私はロボットではありません」を確認してから送信してください。');
       status.textContent = '送信の準備をしています…';
-      const fields = Object.fromEntries(['company', 'branch', 'contact', 'email', 'projectName', 'projectAddress', 'heating', 'start', 'finish', 'note'].map(name => [name, values.get(name)]));
+      const fields = Object.fromEntries(['company', 'branch', 'contact', 'email', 'projectName', 'projectAddress', 'heating', 'start', 'note'].map(name => [name, values.get(name)]));
       pending = await post('api.php?action=prepare', { ...fields, token, files: files.map(file => ({ name: file.name, size: file.size })) });
       pending.offsets = files.map(() => 0);
     }

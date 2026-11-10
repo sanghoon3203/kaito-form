@@ -32,7 +32,7 @@ function check($name, $ok, $detail = '') { global $failed; echo ($ok ? 'ok   ' :
 
 $fields = ['company' => 'テスト工務店', 'branch' => '大阪支店', 'contact' => '山田', 'email' => 'test@example.com',
   'projectName' => '山田様邸 新築工事', 'projectAddress' => '大阪府大阪市1-2-3', 'heating' => 'ﾌｧﾝｺﾝﾍﾞｸﾀｰ',
-  'start' => '2026-12-01', 'finish' => '2026-12-20', 'note' => '=SUM(A1)'];
+  'start' => '2026-12-01', 'note' => '=SUM(A1)'];
 $files = [['name' => 'plan.pdf', 'size' => 1000]];
 
 try {

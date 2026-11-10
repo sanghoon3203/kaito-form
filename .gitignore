@@ -1,0 +1,7 @@
+# secrets
+secret.txt
+configured.gs
+# test / generated
+test-drawing.pdf
+notification-preview.txt
+__pycache__/

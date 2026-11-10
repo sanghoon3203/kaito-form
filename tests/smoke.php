@@ -13,6 +13,9 @@ function write_env(array $extra = []) {
     'SHARED_SECRET=test-secret',
     "DATA_DIR=$dataDir",
     'UPLOAD_URL_PREFIX=http://127.0.0.1:8792/mock-upload.php',
+    // Cloudflare のテスト用キー(常に成功)。後ろに同じキーを書けば上書きできる
+    'TURNSTILE_SITE_KEY=1x00000000000000000000AA',
+    'TURNSTILE_SECRET=1x0000000000000000000000000000000AA',
   ], $extra)));
 }
 write_env(['MIN_FORM_SECONDS=0', 'RATE_LIMIT_PER_HOUR=1000']);
@@ -52,7 +55,7 @@ $pdf = '%PDF-1.7 test drawing';
 $jww = "JwwData.\xc8\x02\x00\x00 test";
 $fields = ['company' => 'テスト工務店', 'branch' => '大阪支店', 'contact' => '山田', 'email' => 'test@example.com',
   'projectName' => '山田様邸 新築工事', 'projectAddress' => '大阪府大阪市1-2-3', 'heating' => 'ﾌｧﾝｺﾝﾍﾞｸﾀｰ',
-  'start' => '2026-12-01', 'note' => '=SUM(A1)', 'website' => ''];
+  'start' => '2026-12-01', 'note' => '=SUM(A1)', 'website' => '', 'cf-turnstile-response' => 'XXXX.DUMMY.TOKEN'];
 $form = function (array $override = [], ?array $files = null) use ($fields, $pdf, $jww) {
   $files = $files ?? ['drawing[0]' => file_of('plan.pdf', $pdf), 'drawing[1]' => file_of('plan.jww', $jww)];
   return $override + ['token' => token()] + $fields + $files;
@@ -61,10 +64,14 @@ $form = function (array $override = [], ?array $files = null) use ($fields, $pdf
 try {
   [$s, $body, $h] = request('index.php');
   check('form page renders', $s === 200 && strpos($body, 'お問い合わせ') !== false && strpos($body, 'サポート') !== false);
-  check('page has no JavaScript', stripos($body, '<script') === false && stripos($body, 'javascript:') === false &&
-    !preg_match('/\son[a-z]+=/i', $body));
-  check('CSP forbids scripts', strpos($h['content-security-policy'] ?? '', "default-src 'none'") !== false &&
-    strpos($h['content-security-policy'] ?? '', 'script-src') === false);
+  preg_match_all('/<script\b[^>]*>/i', $body, $scripts);
+  check('only script is Cloudflare Turnstile', count($scripts[0]) === 1 &&
+    strpos($scripts[0][0], 'src="https://challenges.cloudflare.com/turnstile/v0/api.js"') !== false &&
+    stripos($body, 'javascript:') === false && !preg_match('/\son[a-z]+=/i', $body));
+  check('Turnstile widget has the site key', strpos($body, 'data-sitekey="1x00000000000000000000AA"') !== false);
+  $csp = $h['content-security-policy'] ?? '';
+  check('CSP allows scripts only from Cloudflare', strpos($csp, "default-src 'none'") !== false &&
+    strpos($csp, 'script-src https://challenges.cloudflare.com;') !== false);
   check('old heading is gone', strpos($body, 'お申し込みフォーム') === false && strpos($body, 'お申し込み受付') === false);
 
   $post = $form();
@@ -102,6 +109,12 @@ try {
   [$s, $body] = request('index.php', $form([], $tooMany));
   check('more than 10 PDFs are rejected', $s === 422 && strpos($body, '10ファイルまで') !== false);
 
+  write_env(['MIN_FORM_SECONDS=0', 'RATE_LIMIT_PER_HOUR=1000', 'TURNSTILE_SECRET=2x0000000000000000000000000000000AA']);
+  [$s, $body] = request('index.php', $form());
+  check('failed Turnstile check is rejected', $s === 422 && strpos($body, '確認が完了しませんでした') !== false);
+  [$s, $body] = request('index.php', $form(['cf-turnstile-response' => '']));
+  check('missing Turnstile token is rejected', $s === 422 && strpos($body, '確認が完了しませんでした') !== false);
+
   write_env(['MIN_FORM_SECONDS=5', 'RATE_LIMIT_PER_HOUR=1000']);
   [$s, $body] = request('index.php', $form());
   check('submitting too fast is rejected', $s === 422 && strpos($body, '早すぎます') !== false);
@@ -123,13 +136,10 @@ try {
   [$err] = reserve_quota($ip, 2 * 1024 * 1024, 'big');
   check('per-client upload volume cap', $err !== null && strpos($err, '上限') !== false);
   [$e1] = reserve_quota($ip, 1000, 'a');
-  [$e2, $keys] = reserve_quota($ip, 1000, 'b');
+  [$e2] = reserve_quota($ip, 1000, 'b');
   check('rejected requests do not use up quota', $e1 === null && $e2 === null, "$e1 / $e2");
   [$e3] = reserve_quota($ip, 1000, 'c');
   check('per-client count still applies', $e3 !== null);
-  foreach ($keys as $key) release($key, 'b');
-  [$e4] = reserve_quota($ip, 1000, 'd');
-  check('failed submissions are refunded', $e4 === null, (string) $e4);
 
   check('IPv6 addresses in one /64 share a limit', client_key('2001:db8:1:2::1') === client_key('2001:db8:1:2:ffff::9') &&
     client_key('2001:db8:1:2::1') !== client_key('2001:db8:1:3::1'));

@@ -83,6 +83,7 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--accent);
 .done{max-width:680px;margin:0 auto;text-align:center;padding:0 22px}
 .done h2{font-size:32px;line-height:1.3;margin:0 0 16px}
 .done p{color:var(--sub);margin:0 0 32px}
+.cf-turnstile{display:flex;justify-content:center;min-height:65px;margin-bottom:20px}
 .link-button{display:inline-block;text-decoration:none;font-weight:700;color:var(--text);background:var(--accent);border-radius:999px;padding:12px 32px}
 
 footer{border-top:1px solid var(--line);background:var(--soft);color:var(--sub);font-size:12px}

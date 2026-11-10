@@ -39,8 +39,9 @@ function send_security_headers(): void {
   header('X-Content-Type-Options: nosniff');
   header('Referrer-Policy: no-referrer');
   header('X-Frame-Options: DENY');
-  // JavaScript を一切読み込まない。フォントだけ Google Fonts から読む
-  header("Content-Security-Policy: default-src 'none'; style-src 'unsafe-inline' https://fonts.googleapis.com; " .
+  // 読み込める JavaScript は Cloudflare Turnstile だけ。自前の JavaScript は使わない。フォントは Google Fonts から読む
+  header("Content-Security-Policy: default-src 'none'; script-src https://challenges.cloudflare.com; " .
+    "frame-src https://challenges.cloudflare.com; style-src 'unsafe-inline' https://fonts.googleapis.com; " .
     "font-src https://fonts.gstatic.com; img-src data:; form-action 'self'; base-uri 'none'; frame-ancestors 'none'");
 }
 
@@ -261,6 +262,16 @@ function http(string $method, string $url, array $headers = [], $body = null, in
   return [$status, (string) $result, $responseHeaders];
 }
 
+/** Cloudflare Turnstile の結果をサーバー側で確かめる(ブラウザの判定だけを信用しない) */
+function verify_turnstile($token, string $ip): bool {
+  if (!is_string($token) || $token === '' || strlen($token) > 2048) return false;
+  [$status, $body] = http('POST', 'https://challenges.cloudflare.com/turnstile/v0/siteverify',
+    ['Content-Type: application/x-www-form-urlencoded'],
+    http_build_query(['secret' => env()['TURNSTILE_SECRET'] ?? '', 'response' => $token, 'remoteip' => $ip]), 15);
+  $result = json_decode($body, true);
+  return $status === 200 && is_array($result) && ($result['success'] ?? false) === true;
+}
+
 function script_request(array $data, int $timeout = 60): array {
   $env = env();
   [$status, $body] = http('POST', $env['APPS_SCRIPT_URL'], ['Content-Type: text/plain;charset=UTF-8'],
@@ -298,7 +309,7 @@ function submit_receipt(array $fields, array $files): void {
 /** POST を処理する。@return string[] 画面に出すエラー。空なら受付完了 */
 function handle_post(array $post, $upload, string $ip): array {
   $env = env();
-  foreach (['APPS_SCRIPT_URL', 'SHARED_SECRET'] as $key) {
+  foreach (['APPS_SCRIPT_URL', 'SHARED_SECRET', 'TURNSTILE_SITE_KEY', 'TURNSTILE_SECRET'] as $key) {
     if (empty($env[$key])) return ['現在、受付の準備中です。担当者にお問い合わせください。'];
   }
   // 人には見えない入力欄。ボットだけが埋める
@@ -310,15 +321,13 @@ function handle_post(array $post, $upload, string $ip): array {
   if ($errors) return $errors;
   $tokenError = check_form_token($post['token'] ?? null);
   if ($tokenError !== null) return [$tokenError];
-  // 送信元ごとと全体の、件数とアップロード量の上限(1時間あたり)
-  $id = bin2hex(random_bytes(8));
-  [$quotaError, $reserved] = reserve_quota($ip, (int) array_sum(array_column($files, 'size')), $id);
-  if ($quotaError !== null) return [$quotaError];
-  try {
-    submit_receipt($fields, $files);
-  } catch (Throwable $e) {
-    foreach ($reserved as $key) release($key, $id); // 受付できなかった分は上限に数えない
-    throw $e;
+  if (!verify_turnstile($post['cf-turnstile-response'] ?? '', $ip)) {
+    return ['「私はロボットではありません」の確認が完了しませんでした。もう一度お試しください。'];
   }
+  // 送信元ごとと全体の、件数とアップロード量の上限(1時間あたり)。
+  // ここで数えた分は、この後の処理が失敗しても戻さない(失敗させて上限を回避されないように)
+  [$quotaError] = reserve_quota($ip, (int) array_sum(array_column($files, 'size')), bin2hex(random_bytes(8)));
+  if ($quotaError !== null) return [$quotaError];
+  submit_receipt($fields, $files);
   return [];
 }

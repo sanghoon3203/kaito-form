@@ -78,10 +78,13 @@ page_start('お問い合わせ | BAQOOL サポート');
     </div>
 
     <div class="submit">
+      <div class="cf-turnstile" data-sitekey="<?= h(env()['TURNSTILE_SITE_KEY'] ?? '') ?>" data-language="ja"></div>
+      <noscript><p class="errors">送信前の確認のため、ブラウザの JavaScript を有効にしてください。</p></noscript>
       <button class="button" type="submit">内容を送信する</button>
       <p class="hint">ファイルの大きさによっては、送信に時間がかかる場合がございます。<br>画面が切り替わるまで、送信ボタンは一度だけ押してお待ちください。</p>
     </div>
   </form>
 </main>
+<script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
 <?php
 page_end();

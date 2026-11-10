@@ -29,7 +29,7 @@
       <div class="field"><label for="start">着工予定日</label><input id="start" name="start" type="date" aria-describedby="start-hint"><p class="hint" id="start-hint">予定日が未定の場合は、空欄のままご送信いただけます。</p></div>
       <div class="field"><label for="note">備考</label><textarea id="note" name="note" maxlength="1000"></textarea></div>
       <hr>
-      <div class="field"><label for="drawing">図面ファイル<span class="required">必須</span></label><input id="drawing" name="drawing" type="file" accept="application/pdf,.pdf,.jww" multiple required aria-describedby="drawing-hint"><p class="hint" id="drawing-hint">PDFとJWWをそれぞれ10ファイルまで添付できます。</p></div>
+      <div class="field"><label for="drawing">図面ファイル<span class="required">必須</span></label><input id="drawing" name="drawing" type="file" accept="application/pdf,.pdf,.jww" multiple required aria-describedby="drawing-hint"><p class="hint" id="drawing-hint">PDFとJWWをそれぞれ10ファイルまで、1ファイル50MBまで添付できます。</p></div>
       <div id="turnstile"></div><button class="button" id="submit" type="submit">内容を送信する</button><p id="status" class="status" role="status" aria-live="polite"></p>
     </form>
       </div>
@@ -84,6 +84,9 @@ form.addEventListener('submit', async event => {
         files.filter(file => /\.pdf$/i.test(file.name)).length > 10 ||
         files.filter(file => /\.jww$/i.test(file.name)).length > 10) {
       throw new Error('PDFとJWWは、それぞれ10ファイルまで添付できます。');
+    }
+    if (files.some(file => file.size > 50 * 1024 * 1024)) {
+      throw new Error('ファイルは1つあたり50MBまでです。');
     }
     if (!pending) {
       const token = values.get('cf-turnstile-response');

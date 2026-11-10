@@ -6,6 +6,8 @@ declare(strict_types=1);
 const CHUNK_SIZE = 4 * 1024 * 1024; // Google のレジューム送信は 256KB の倍数が必要
 const JSON_LIMIT = 65536;
 const TOKEN_TTL = 6 * 3600;
+const MAX_FILE_SIZE = 50 * 1024 * 1024; // 1ファイルの上限。Apps Script が中身を検査できる大きさ(50MB)に合わせる
+const FILE_SIGNATURES = ['pdf' => '%PDF-', 'jww' => 'JwwData.']; // ファイル先頭の決まった文字列
 const HEATING_TYPES = ['放熱器', 'AC', 'ﾌｧﾝｺﾝﾍﾞｸﾀｰ']; // 案件基本情報 K 列のプルダウンと同じ表記
 
 header('Cache-Control: no-store');
@@ -36,7 +38,7 @@ function load_env(): array {
   return [];
 }
 
-function http(string $method, string $url, array $headers = [], ?string $body = null, bool $follow = true): array {
+function http(string $method, string $url, array $headers = [], ?string $body = null, bool $follow = true, int $timeout = 60): array {
   $responseHeaders = [];
   $ch = curl_init($url);
   curl_setopt_array($ch, [
@@ -46,7 +48,7 @@ function http(string $method, string $url, array $headers = [], ?string $body = 
     CURLOPT_MAXREDIRS => 5,
     CURLOPT_PROTOCOLS => CURLPROTO_HTTPS | CURLPROTO_HTTP, // file:// などを使わせない
     CURLOPT_REDIR_PROTOCOLS => CURLPROTO_HTTPS,
-    CURLOPT_TIMEOUT => 60,
+    CURLOPT_TIMEOUT => $timeout,
     CURLOPT_HTTPHEADER => $headers,
     CURLOPT_HEADERFUNCTION => function ($ch, $line) use (&$responseHeaders) {
       $parts = explode(':', $line, 2);
@@ -86,9 +88,9 @@ function read_json(): array {
   return $data;
 }
 
-function script_request(array $env, array $data): array {
+function script_request(array $env, array $data, int $timeout = 60): array {
   [$status, $body] = http('POST', $env['APPS_SCRIPT_URL'], ['Content-Type: text/plain;charset=UTF-8'],
-    json_encode($data + ['secret' => $env['SHARED_SECRET']], JSON_UNESCAPED_UNICODE));
+    json_encode($data + ['secret' => $env['SHARED_SECRET']], JSON_UNESCAPED_UNICODE), true, $timeout);
   $result = json_decode($body, true);
   if ($status !== 200 || !is_array($result) || empty($result['ok'])) throw new RuntimeException('Apps Script failed');
   return $result;
@@ -133,19 +135,23 @@ function prepare(array $env): void {
   $files = $data['files'] ?? null;
   $valid = is_array($files) && $files && count($files) <= 20;
   $pdf = $jww = 0;
+  $tooLarge = false;
   foreach ($valid ? $files : [] as $file) {
     $name = is_array($file) && is_string($file['name'] ?? null) ? $file['name'] : '';
     $size = is_array($file) ? ($file['size'] ?? 0) : 0;
     if (mb_strlen($name) > 200 || !preg_match('/\.(pdf|jww)$/iD', $name) || preg_match('/[\x00-\x1f\x7f]/', $name) || !is_int($size) || $size <= 0) { $valid = false; break; }
+    if ($size > MAX_FILE_SIZE) $tooLarge = true;
     preg_match('/\.pdf$/iD', $name) ? $pdf++ : $jww++;
   }
   if (!$valid || $pdf > 10 || $jww > 10) respond(['error' => 'PDFとJWWは、それぞれ10ファイルまで添付できます。'], 400);
+  if ($tooLarge) respond(['error' => 'ファイルは1つあたり50MBまでです。'], 400);
   if (!verify_turnstile($env, $data['token'] ?? '')) respond(['error' => '「私はロボットではありません」を確認してから送信してください。'], 403);
 
   $files = array_map(function ($f) { return ['name' => $f['name'], 'size' => $f['size']]; }, $files);
   $prepared = script_request($env, ['action' => 'prepare', 'company' => $fields['company'], 'files' => $files]);
   $uploads = array_map(function ($u) use ($env) {
-    return capability(['kind' => 'upload', 'url' => $u['url'], 'size' => $u['size'], 'type' => $u['type']], $env['SHARED_SECRET']);
+    return capability(['kind' => 'upload', 'url' => $u['url'], 'size' => $u['size'], 'type' => $u['type'], 'name' => $u['name']],
+      $env['SHARED_SECRET']);
   }, $prepared['uploads']);
   $receipt = capability(['kind' => 'receipt', 'fields' => $fields, 'folderId' => $prepared['folderId'],
     'files' => array_map(function ($u) { return ['id' => $u['id'], 'size' => $u['size'], 'name' => $u['name']]; }, $prepared['uploads'])],
@@ -171,8 +177,13 @@ function relay_chunk(array $env): void {
   }
   $body = $probe ? '' : file_get_contents('php://input', false, null, 0, CHUNK_SIZE + 1);
   if (!$probe && strlen((string) $body) !== $length) respond(['error' => 'ファイルの送信範囲が正しくありません。'], 400);
-  if (!$probe && $start === 0 && $upload['type'] === 'application/pdf' && substr($body, 0, 5) !== '%PDF-') {
-    respond(['error' => 'PDFの形式をご確認ください。'], 400);
+  if (!$probe && $start === 0) {
+    // 拡張子だけ .pdf / .jww に変えた別の形式のファイル(実行ファイルなど)を、最初の部分で止める
+    $ext = strtolower(pathinfo((string) ($upload['name'] ?? ''), PATHINFO_EXTENSION));
+    $signature = FILE_SIGNATURES[$ext] ?? null;
+    if ($signature === null || strncmp((string) $body, $signature, strlen($signature)) !== 0) {
+      respond(['error' => $ext === 'jww' ? 'JWWファイルの形式をご確認ください。' : 'PDFの形式をご確認ください。'], 400);
+    }
   }
   [$status, , $headers] = http('PUT', $url, ['Content-Range: ' . $range, 'Content-Length: ' . strlen((string) $body),
     'Content-Type: ' . $upload['type']], (string) $body, false);
@@ -187,7 +198,9 @@ function relay_chunk(array $env): void {
 function finish(array $env): void {
   $receipt = read_capability(read_json()['receipt'] ?? '', 'receipt', $env['SHARED_SECRET']);
   if (!$receipt) respond(['error' => '受付の有効期限が切れました。'], 403);
-  script_request($env, ['action' => 'finish', 'folderId' => $receipt['folderId'], 'files' => $receipt['files']] + $receipt['fields']);
+  // Apps Script が PDF の中身を検査するので、記録の完了まで数分かかることがある
+  @set_time_limit(330);
+  script_request($env, ['action' => 'finish', 'folderId' => $receipt['folderId'], 'files' => $receipt['files']] + $receipt['fields'], 300);
   respond(['ok' => true]);
 }
 

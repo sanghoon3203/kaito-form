@@ -60,6 +60,22 @@ try {
   check('upload with wrong total size is rejected', $s === 400);
   [$s] = call('POST', 'api.php?action=upload', 'abc', ['X-Upload-Key: forged.key', 'X-Content-Range: bytes 0-2/1000']);
   check('forged upload key is rejected', $s === 403);
+
+  [$s] = call('POST', 'api.php?action=prepare', $fields + ['files' => [['name' => 'big.pdf', 'size' => 50 * 1024 * 1024 + 1]], 'token' => 'x']);
+  check('file over 50MB is rejected', $s === 400);
+
+  // 先頭の形式チェック。正しい形式なら Google への中継まで進む(偽の送信先なので 409/502 になる)
+  $chunk = function (string $head) { return str_pad($head, 1000, "\0"); };
+  $range = ['X-Content-Range: bytes 0-999/1000'];
+  [$s] = call('POST', 'api.php?action=upload', $chunk('MZ'), array_merge(['X-Upload-Key: ' . $r['uploads'][0]], $range));
+  check('.pdf that is not a PDF is rejected', $s === 400);
+  [$s] = call('POST', 'api.php?action=upload', $chunk('%PDF-1.7'), array_merge(['X-Upload-Key: ' . $r['uploads'][0]], $range));
+  check('real PDF header passes the check', in_array($s, [409, 502], true), "status $s");
+  [, $j] = call('POST', 'api.php?action=prepare', $fields + ['files' => [['name' => 'plan.jww', 'size' => 1000]], 'token' => 'x']);
+  [$s] = call('POST', 'api.php?action=upload', $chunk('MZ'), array_merge(['X-Upload-Key: ' . $j['uploads'][0]], $range));
+  check('.jww that is not a JWW is rejected', $s === 400);
+  [$s] = call('POST', 'api.php?action=upload', $chunk('JwwData.'), array_merge(['X-Upload-Key: ' . $j['uploads'][0]], $range));
+  check('real JWW header passes the check', in_array($s, [409, 502], true), "status $s");
   $tampered = substr($r['receipt'], 0, -3) . 'AA=';
   [$s] = call('POST', 'api.php?action=finish', ['receipt' => $tampered]);
   check('tampered receipt is rejected', $s === 403);

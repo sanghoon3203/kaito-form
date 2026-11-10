@@ -24,14 +24,20 @@ function fakeSheet(headers, rows, { formulas = {}, rejectCol = 0, maxRows = 1000
   };
 }
 
-function run(sheet, data) {
+function load(files = {}) {
   const ctx = {
-    SpreadsheetApp: { openById: () => ({ getSheetByName: () => sheet }), Direction: { UP: 'up' } },
-    Utilities: { formatDate: () => '2026/11/10' },
-    console,
+    SpreadsheetApp: {}, console,
+    Utilities: { formatDate: () => '2026/11/10', newBlob: b => ({ getDataAsString: () => Buffer.from(b).toString('latin1') }) },
+    DriveApp: { getFileById: id => ({ getBlob: () => ({ getBytes: () => Buffer.from(files[id], 'latin1') }) }) },
   };
   vm.createContext(ctx);
   vm.runInContext(fs.readFileSync(__dirname + '/../Code.gs', 'utf8'), ctx);
+  return ctx;
+}
+
+function run(sheet, data) {
+  const ctx = load();
+  ctx.SpreadsheetApp = { openById: () => ({ getSheetByName: () => sheet }), Direction: { UP: 'up' } };
   const props = { getProperty: k => ({ CASE_SHEET_ID: 'X' })[k] || null };
   return ctx.appendCaseRow(props, data, 'https://drive.google.com/drive/folders/F');
 }
@@ -72,5 +78,27 @@ assert.ok(memo.includes('顧客名：=テスト工務店') && memo.includes('顧
 
 // 4. 備考列がなければ失敗として扱う(通知メールで手入力を促す)
 assert.throws(() => run(fakeSheet(HEADERS.filter(h => h !== '備考'), []), DATA), /備考/);
+
+// 5. PDF の危険な要素の検出(#xx で隠した名前も見つける。正常な PDF は何も出さない)
+const pdfs = {
+  clean: '%PDF-1.7\n1 0 obj << /Type /Catalog /Pages 2 0 R /OpenAction 3 0 R >> endobj',
+  js: '%PDF-1.7\n1 0 obj << /S /JavaScript /JS (app.alert(1)) >> endobj',
+  hidden: '%PDF-1.7\n1 0 obj << /S /L#61unch /F (cmd.exe) >> endobj',
+  embedded: '%PDF-1.7\n<< /Names << /EmbeddedFiles 4 0 R >> >>',
+};
+const scan = load(pdfs);
+assert.deepStrictEqual([...scan.findRiskyPdfNames(Buffer.from(pdfs.clean, 'latin1'))], []);
+assert.deepStrictEqual([...scan.findRiskyPdfNames(Buffer.from(pdfs.js, 'latin1'))], ['/JavaScript', '/JS']);
+assert.deepStrictEqual([...scan.findRiskyPdfNames(Buffer.from(pdfs.hidden, 'latin1'))], ['/Launch']);
+const warnings = scan.inspectUploadedFiles([
+  { id: 'clean', name: 'a.pdf', size: 10 }, { id: 'embedded', name: 'b.pdf', size: 10 },
+  { id: 'none', name: 'c.jww', size: 10 }, { id: 'js', name: 'd.pdf', size: 200 * 1024 * 1024 },
+]);
+assert.deepStrictEqual([...warnings], ['b.pdf：/EmbeddedFiles', 'd.pdf：未検査（合計サイズの上限を超えたため）']);
+
+// 6. 警告は案件基本情報の備考にも残る
+s = fakeSheet(HEADERS, []);
+run(s, { ...DATA, warnings: ['b.pdf：/EmbeddedFiles'] });
+assert.ok(s.cells[1][col('備考')].includes('【要注意】b.pdf：/EmbeddedFiles'));
 
 console.log('ok: case row tests passed');

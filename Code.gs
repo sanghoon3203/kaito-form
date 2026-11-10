@@ -64,6 +64,7 @@ function appendCaseRow(props, data, folderUrl) {
   const memo = [
     '[フォーム受付 ' + Utilities.formatDate(new Date(), 'Asia/Tokyo', 'yyyy/MM/dd') + '] 担当：' + data.contact + '（' + data.email + '）',
     '図面：' + folderUrl,
+    ...(data.warnings || []).map(warning => '【要注意】' + warning),
     ...leftover,
     data.note || '',
   ].filter(Boolean).join('\n');
@@ -73,6 +74,7 @@ function appendCaseRow(props, data, folderUrl) {
 
 function prepareDriveUploads(props, data) {
   const root = DriveApp.getFolderById(props.getProperty('ROOT_FOLDER_ID'));
+  if (data.files.some(file => !(file.size > 0 && file.size <= 50 * 1024 * 1024))) return { ok: false }; // api.php と同じ上限
   const company = data.company.replace(/[\/\\\x00-\x1f]/g, ' ').trim();
   if (!company) return { ok: false };
   const lock = LockService.getScriptLock();
@@ -112,6 +114,34 @@ function prepareDriveUploads(props, data) {
   return { ok: true, folderId, uploads };
 }
 
+// PDF の中にある、開いたときに動作を起こせる要素の名前。正常な図面にも入ることがあるので、拒否せず「要注意」として知らせる。
+// 名前は #xx(16進)で書き換えて隠せるので、元に戻してから探す。圧縮されたストリームの中までは見えない。
+const RISKY_PDF_NAMES = /\/(JavaScript|JS|Launch|EmbeddedFiles?|RichMedia|XFA|SubmitForm|ImportData|GoToR)(?![A-Za-z0-9])/g;
+const SCAN_BUDGET = 100 * 1024 * 1024; // ponytail: 1回の受付で検査する合計サイズ。受付が遅くなりすぎないための上限
+
+function findRiskyPdfNames(bytes) {
+  const text = Utilities.newBlob(bytes).getDataAsString('ISO-8859-1')
+    .replace(/#([0-9A-Fa-f]{2})/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)));
+  return [...new Set(text.match(RISKY_PDF_NAMES) || [])];
+}
+
+function inspectUploadedFiles(files) {
+  let budget = SCAN_BUDGET;
+  const warnings = [];
+  files.forEach(file => {
+    if (!/\.pdf$/i.test(file.name)) return; // JWW は PHP 側で先頭の形式を確かめている
+    if (file.size > budget) { warnings.push(file.name + '：未検査（合計サイズの上限を超えたため）'); return; }
+    budget -= file.size;
+    try {
+      const found = findRiskyPdfNames(DriveApp.getFileById(file.id).getBlob().getBytes());
+      if (found.length) warnings.push(file.name + '：' + found.join(' '));
+    } catch (error) {
+      warnings.push(file.name + '：検査できませんでした');
+    }
+  });
+  return warnings;
+}
+
 function saveUploadReceipt(props, data) {
   const fileLinks = data.files.map(expected => {
     const file = Drive.Files.get(expected.id, { supportsAllDrives: true, fields: 'id,name,size,parents,trashed,webViewLink' });
@@ -119,6 +149,7 @@ function saveUploadReceipt(props, data) {
         !file.parents || !file.parents.includes(data.folderId)) throw new Error('Upload is incomplete');
     return file.webViewLink || 'https://drive.google.com/file/d/' + file.id + '/view';
   });
+  data.warnings = inspectUploadedFiles(data.files);
   const safe = safeCell;
   const folderUrl = 'https://drive.google.com/drive/folders/' + data.folderId;
   const lock = LockService.getScriptLock();
@@ -137,10 +168,12 @@ function saveUploadReceipt(props, data) {
     }
     sheet.appendRow([new Date(), safe(data.company), safe(data.contact), safe(data.email), safe(data.start), safe(data.finish),
       safe(data.files.map(file => file.name).join('\n')), joinedLinks, folderUrl,
-      safe(data.branch), safe(data.projectName), safe(data.projectAddress), safe(data.heating), safe(data.note)]);
+      safe(data.branch), safe(data.projectName), safe(data.projectAddress), safe(data.heating), safe(data.note),
+      safe(data.warnings.join('\n'))]);
     if (sheet.getRange('J1').getValue() === '') {
       sheet.getRange('J1:N1').setValues([['支店名', '案件名', '案件住所', '床下暖房種別', '備考']]);
     }
+    if (sheet.getRange('O1').getValue() === '') sheet.getRange('O1').setValue('要注意');
     if (fileLinks.length > 1) {
       try {
         const linkCell = sheet.getRange(2, 8, sheet.getLastRow() - 1, 1).createTextFinder(joinedLinks).matchEntireCell(true).findNext();
@@ -210,7 +243,8 @@ function notifyReceipt(data, filenames, folderUrl, spreadsheetUrl, caseResult) {
   if (!recipient) return;
   const oneLine = value => String(value || '').replace(/[\r\n\x00-\x1f\x7f]+/g, ' ').trim();
   const company = oneLine(data.company);
-  const subject = '【' + displayName + '】' + company + 'からの依頼が届いてます！';
+  const warnings = data.warnings || [];
+  const subject = (warnings.length ? '【要注意】' : '') + '【' + displayName + '】' + company + 'からの依頼が届いてます！';
   const body = [
     company + 'から図面の提出がありました。',
     '',
@@ -224,6 +258,8 @@ function notifyReceipt(data, filenames, folderUrl, spreadsheetUrl, caseResult) {
     '',
     '添付ファイル（' + filenames.length + '件）',
     ...filenames.map(name => '・' + oneLine(name)),
+    ...(warnings.length ? ['', '【要注意】添付ファイルの検査で、次の点が見つかりました（開くと動作を起こせる要素、または未検査のファイル）。',
+      'ダウンロードせず、Google ドライブのプレビューで確認してください。', ...warnings.map(w => '・' + oneLine(w))] : []),
     '',
     '図面の保存先（Google ドライブ）',
     folderUrl,

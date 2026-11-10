@@ -50,7 +50,7 @@ a{color:inherit}
 .hero{padding:calc(var(--bar) + 64px) 22px 40px;text-align:center}
 .mark{width:72px;height:72px;display:block;margin:0 auto 20px}
 .hero h1{margin:0;display:flex;align-items:center;justify-content:center;gap:.35em;font-size:48px;font-weight:700;line-height:1.1;letter-spacing:.01em}
-.hero h1 img{height:.74em;width:auto;display:block;transform:translateY(.02em)}
+.hero h1 img{height:1em;width:auto;display:block;transform:translateY(.1em)}
 
 .intro{max-width:800px;margin:0 auto;padding:24px 22px 40px;text-align:center}
 .intro h2{font-size:32px;line-height:1.25;margin:0 0 16px;font-weight:700}

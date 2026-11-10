@@ -71,7 +71,7 @@ function capability(array $value, string $secret): string {
 
 function read_capability($token, string $kind, string $secret): ?array {
   if (!is_string($token) || strlen($token) > JSON_LIMIT ||
-      !preg_match('~^[A-Za-z0-9+/]+={0,2}\.[A-Za-z0-9+/]{43}=$~', $token)) return null;
+      !preg_match('~^[A-Za-z0-9+/]+={0,2}\.[A-Za-z0-9+/]{43}=$~D', $token)) return null;
   [$payload, $signature] = explode('.', $token);
   if (!hash_equals(b64(hash_hmac('sha256', $payload, $secret, true)), $signature)) return null;
   $value = json_decode((string) base64_decode($payload, true), true);
@@ -117,7 +117,7 @@ function validate_fields(array $data): ?array {
     if ($value === null) return null;
     $fields[$name] = $value;
   }
-  $date = function (string $v): bool { return $v === '' || (bool) preg_match('/^\d{4}-\d{2}-\d{2}$/', $v); };
+  $date = function (string $v): bool { return $v === '' || (bool) preg_match('/^\d{4}-\d{2}-\d{2}$/D', $v); };
   if ($fields['company'] === '' || $fields['contact'] === '' || $fields['projectName'] === '' ||
       $fields['projectAddress'] === '' || !filter_var($fields['email'], FILTER_VALIDATE_EMAIL) ||
       ($fields['heating'] !== '' && !in_array($fields['heating'], HEATING_TYPES, true)) ||
@@ -136,8 +136,8 @@ function prepare(array $env): void {
   foreach ($valid ? $files : [] as $file) {
     $name = is_array($file) && is_string($file['name'] ?? null) ? $file['name'] : '';
     $size = is_array($file) ? ($file['size'] ?? 0) : 0;
-    if (mb_strlen($name) > 200 || !preg_match('/\.(pdf|jww)$/i', $name) || !is_int($size) || $size <= 0) { $valid = false; break; }
-    preg_match('/\.pdf$/i', $name) ? $pdf++ : $jww++;
+    if (mb_strlen($name) > 200 || !preg_match('/\.(pdf|jww)$/iD', $name) || preg_match('/[\x00-\x1f\x7f]/', $name) || !is_int($size) || $size <= 0) { $valid = false; break; }
+    preg_match('/\.pdf$/iD', $name) ? $pdf++ : $jww++;
   }
   if (!$valid || $pdf > 10 || $jww > 10) respond(['error' => 'PDFとJWWは、それぞれ10ファイルまで添付できます。'], 400);
   if (!verify_turnstile($env, $data['token'] ?? '')) respond(['error' => '「私はロボットではありません」を確認してから送信してください。'], 403);
@@ -163,7 +163,7 @@ function relay_chunk(array $env): void {
   $probe = $range === 'bytes */' . $size;
   $start = $end = 0;
   if (!$probe) {
-    if (!preg_match('/^bytes (\d+)-(\d+)\/(\d+)$/', $range, $m)) respond(['error' => 'ファイルの送信範囲が正しくありません。'], 400);
+    if (!preg_match('/^bytes (\d+)-(\d+)\/(\d+)$/D', $range, $m)) respond(['error' => 'ファイルの送信範囲が正しくありません。'], 400);
     [$start, $end, $total] = [(int) $m[1], (int) $m[2], (int) $m[3]];
     $length = $end - $start + 1;
     if ($total !== $size || $end >= $size || $length <= 0 || $length > CHUNK_SIZE ||
@@ -177,7 +177,7 @@ function relay_chunk(array $env): void {
   [$status, , $headers] = http('PUT', $url, ['Content-Range: ' . $range, 'Content-Length: ' . strlen((string) $body),
     'Content-Type: ' . $upload['type']], (string) $body, false);
   if ($status === 308) {
-    $offset = preg_match('/^bytes=0-(\d+)$/', $headers['range'] ?? '', $r) ? (int) $r[1] + 1 : 0;
+    $offset = preg_match('/^bytes=0-(\d+)$/D', $headers['range'] ?? '', $r) ? (int) $r[1] + 1 : 0;
     respond(['offset' => $offset]);
   }
   if ($status >= 200 && $status < 300) respond(['offset' => $size]);

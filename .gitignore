@@ -5,3 +5,4 @@ configured.gs
 test-drawing.pdf
 notification-preview.txt
 __pycache__/
+.env

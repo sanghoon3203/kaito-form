@@ -1,0 +1,5 @@
+# .env などのドットファイルを公開しない(.env は public の外に置くのが基本)
+<FilesMatch "^\.">
+  Require all denied
+</FilesMatch>
+Options -Indexes

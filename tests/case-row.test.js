@@ -37,7 +37,7 @@ function fakeSheet(headers, rows, { formulas = {}, rejectCol = 0, maxRows = 1000
 function load(files = {}) {
   const ctx = {
     SpreadsheetApp: {}, console,
-    Utilities: { formatDate: (d, tz, f) => ({ yyMM: '2611', 'yyyy-MM-dd': '2026-11-11' })[f] || '2026/11/11',
+    Utilities: { base64Decode: s => Buffer.from(s, 'base64'), formatDate: (d, tz, f) => ({ yyMM: '2611', 'yyyy-MM-dd': '2026-11-11' })[f] || '2026/11/11',
       // シートのタイムゾーンで暦日を日付にする(呼ばれ方を記録する)
       parseDate: (str, tz) => { parsed.push(str + '@' + tz); const [y, m, d] = str.split('-').map(Number); return new Date(y, m - 1, d); }, newBlob: b => ({ getDataAsString: () => Buffer.from(b).toString('latin1') }) },
     DriveApp: { getFileById: id => ({
@@ -184,6 +184,7 @@ assert.ok(['2026-11-11@America/Los_Angeles', '2027-02-01@America/Los_Angeles', '
   'dates are made in the sheet time zone: ' + lastParsed);
 assert.strictEqual(number, 'B2611-010', 'next number after the largest this month across every sheet (ロゴス B2611-009)');
 assert.strictEqual(designRes, '豊栄建設 row 4');
+assert.strictEqual(book['豊栄建設'].cells[3][5], undefined, 'PDF だけなら CAD依頼日は空欄');
 const hoei = book['豊栄建設'];
 const h = name => hoei.cells[0].indexOf(name);
 assert.deepStrictEqual([hoei.cells[1][0], hoei.cells[2][0]], ['既存A', '既存B'], 'older rows keep their order');
@@ -197,16 +198,18 @@ assert.ok(['作図担当', 'ステータス', '設計料(税抜)'].every(n => !h
 assert.ok(lastParsed.includes('2026-11-12@America/Los_Angeles') && hoei.formats['4,' + (h('図面納品日') + 1)] === 'yy/mm/dd', '納品予定日 goes to 図面納品日');
 const delivery = hoei.cells[3][h('図面納品日')];
 assert.ok(delivery.getFullYear() === 2026 && delivery.getMonth() === 10 && delivery.getDate() === 12);
-assert.strictEqual(hoei.cells[3][h('備考')], ['納期短縮：1営業日（+3万円）', '床下AC', '至急'].join(String.fromCharCode(10)));
+assert.strictEqual(hoei.cells[3][h('備考')], ['納期短縮：1営業日（+3万円）', '床下AC', '至急'].join('/'));
 assert.strictEqual(caseSheet.cells[2][HEADERS.indexOf('案件番号')], 'B2611-010', 'same number in 案件管理表');
 // ロゴスは半角カナでも当たり、床下暖房種別の列に入る
-runDesign({ ...DATA, company: 'ﾛｺﾞｽﾎｰﾑ', projectName: '田中 花子' });
+runDesign({ ...DATA, company: 'ﾛｺﾞｽﾎｰﾑ', projectName: '田中 花子', files: [{ id: 'x', name: '図面.JWW', size: 9 }] });
+assert.ok(book['ロゴスホーム'].cells[2][4].getDate() === 11 && book['ロゴスホーム'].cells[2][6].getDate() === 11, 'JWW が届いたら PDF依頼日と CAD依頼日が同じ申し込み日');
 const logos = book['ロゴスホーム'];
-assert.deepStrictEqual([logos.cells[2][0], logos.cells[2][1], logos.cells[2][14], logos.cells[2][15]], ['大阪支店', '田中 花子', 'B2611-011', 'AC']);
+assert.deepStrictEqual([logos.cells[2][0], logos.cells[2][1], logos.cells[2][14], logos.cells[2][15]], ['大阪支店', '田中 花子', 'B2611-011', undefined]);
+assert.ok(logos.cells[2][12].includes('床下AC'), 'ロゴスホームでも床下暖房種別は備考に書く');
 // どれにも当たらない会社は「その他」の会社名列へ
 runDesign({ ...DATA, company: '山本工務店', projectName: '佐藤 一郎' });
 assert.deepStrictEqual([book['その他'].cells[2][0], book['その他'].cells[2][2], book['その他'].cells[2][15]], ['山本工務店', '佐藤 一郎', 'B2611-012']);
-assert.strictEqual(book['その他'].cells[2][13], ['納期短縮：1営業日（+3万円）', '大阪支店', '床下AC', '至急'].join(String.fromCharCode(10)), 'その他は備考に支店名');
+assert.strictEqual(book['その他'].cells[2][13], ['納期短縮：1営業日（+3万円）', '大阪支店', '床下AC', '至急'].join('/'), 'その他は備考に支店名');
 
 if (process.argv.includes('--show')) {
   const show = (name, sheet) => { console.log('\n[' + name + ']'); sheet.cells.forEach((r, i) => console.log(i + 1, JSON.stringify(sheet.cells[0].map((hd, j) => [hd || '(A)', r[j] instanceof Date ? r[j].toISOString().slice(0, 10) : r[j]]).filter(([, v]) => v !== '' && v !== undefined)))); };
@@ -252,5 +255,6 @@ assert.ok(sent[0].htmlBody.includes('&lt;b&gt;A社&lt;/b&gt;') && !sent[0].htmlB
 assert.ok(sent[0].htmlBody.includes('B2611-001') && sent[0].htmlBody.includes('設計用・顧客管理への登録に失敗しました'));
 assert.ok(![sent[0].body, sent[0].htmlBody].some(t => t.includes('drive.google.com') || t.includes('docs.google.com') || t.includes('row 5')));
 assert.strictEqual(sent[0].attachments.length, 1);
+assert.ok(sent[0].htmlBody.includes('cid:baqoolLogo') && sent[0].inlineImages.baqoolLogo && sent[0].body.includes('会社名　<b>A社</b>'));
 
 console.log('ok: case row tests passed');

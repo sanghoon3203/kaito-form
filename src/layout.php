@@ -23,6 +23,8 @@ function page_start(string $title): void {
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="robots" content="noindex, nofollow">
 <title><?= h($title) ?></title>
+<?php /* ブラウザのタブに出すアイコン(カイトー商会の丸いマーク) */ ?>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,<?= base64_encode('<svg xmlns="http://www.w3.org/2000/svg" viewBox="2 2 77 77"><path fill="#1B7FBE" d="' . kaito_mark_path() . '"/></svg>') ?>">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700&display=swap">

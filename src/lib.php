@@ -8,8 +8,8 @@ const MAX_TOTAL_SIZE = 80 * 1024 * 1024; // 1回の送信で添付できる合�
 const MAX_FILES = 10;                    // PDF と JWW を合わせた個数
 const FILE_SIGNATURES = ['pdf' => '%PDF-', 'jww' => 'JwwData.']; // ファイル先頭の決まった文字列
 const HEATING_TYPES = ['放熱器', 'AC', 'ﾌｧﾝｺﾝﾍﾞｸﾀｰ']; // 案件基本情報「床下暖房種別」のプルダウンと同じ表記
-// 納期の短縮の選択肢 => 受付日から納品までの営業日数
-const RUSH_OPTIONS = ['希望しない' => 4, '翌営業日（+3万円）' => 1, '2営業日後（+2万円）' => 2, '3営業日後（+1万円）' => 3];
+// 納期の短縮の選択肢 => 作図にかかる営業日数(受付日は数えない)。納品は、その次の営業日
+const RUSH_OPTIONS = ['希望しない' => 4, '1営業日（+3万円）' => 1, '2営業日（+2万円）' => 2, '3営業日（+1万円）' => 3];
 const BUSINESS_CLOSE = '17:30'; // 営業時間は平日 8:30〜17:30。これを過ぎた申し込みは翌営業日の受付
 // 土日のほかに休む日(国民の祝日)。年末年始などの休業日や、2028年以降の祝日はここに足す
 const HOLIDAYS = ['2026-11-23', '2027-01-01', '2027-01-11', '2027-02-11', '2027-02-23', '2027-03-22', '2027-04-29',
@@ -205,15 +205,16 @@ function add_business_days(DateTimeImmutable $d, int $n): DateTimeImmutable {
 }
 
 /**
- * 図面の納品予定日(Y-m-d)。受付日(営業時間を過ぎていれば翌営業日)を除いて数える。
- * 短縮なしは4営業日後。希望納期がそれより後なら希望納期。短縮ありは選んだ営業日数後。
+ * 図面の納品予定日(Y-m-d)。受付日(営業時間を過ぎていれば翌営業日)は数えず、作図に営業日数ぶんかかり、
+ * その次の営業日に納品する(例:金曜15時に「1営業日」→ 月曜に作図、火曜に納品)。
+ * 短縮なしは4営業日。希望納期がその納品日より後なら希望納期。
  */
 function delivery_date(string $rush, string $deadline, ?DateTimeImmutable $now = null): string {
   $now = $now ?? now_tokyo();
   $received = $now->setTime(0, 0);
   if (!is_business_day($received) || $now->format('H:i') > BUSINESS_CLOSE) $received = add_business_days($received, 1);
   $days = RUSH_OPTIONS[$rush] ?? RUSH_OPTIONS['希望しない'];
-  $date = add_business_days($received, $days)->format('Y-m-d');
+  $date = add_business_days($received, $days + 1)->format('Y-m-d');
   $noRush = $days === RUSH_OPTIONS['希望しない'];
   return $noRush && preg_match('/^\d{4}-\d{2}-\d{2}$/D', $deadline) && $deadline > $date ? $deadline : $date;
 }
@@ -256,6 +257,8 @@ function validate_fields(array $post): array {
       $errors[] = $label . 'をご確認ください。';
     }
   }
+  // 完工予定日は、着工予定日より後でなければならない
+  if (!$errors && $fields['finish'] <= $fields['start']) $errors[] = '完工予定日は、着工予定日より後の日付にしてください。';
   // 納期の短縮を選んだら、希望納期はその営業日数後の日付でなければならない
   if (!$errors && $fields['rush'] !== '希望しない') {
     $rushDate = delivery_date($fields['rush'], '');

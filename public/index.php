@@ -85,13 +85,13 @@ page_start('お問い合わせ | BAQOOL サポート');
       </select></div>
       <div class="grid">
         <div class="field"><label for="start">着工予定日<span class="req">必須</span></label><input id="start" name="start" type="date" required aria-describedby="start-hint" value="<?= $v('start') ?>"><p class="hint" id="start-hint">おおよその日付で構いません。</p></div>
-        <div class="field"><label for="finish">完工予定日<span class="req">必須</span></label><input id="finish" name="finish" type="date" required aria-describedby="finish-hint" value="<?= $v('finish') ?>"><p class="hint" id="finish-hint">おおよその日付で構いません。</p></div>
+        <div class="field"><label for="finish">完工予定日<span class="req">必須</span></label><input id="finish" name="finish" type="date" required aria-describedby="finish-hint" value="<?= $v('finish') ?>"><p class="hint" id="finish-hint">おおよその日付で構いません。</p><p class="file-error" id="finish-error" role="alert"></p></div>
       </div>
       <div class="grid">
-        <div class="field"><label for="deadline">図面の希望納期<span class="req">必須</span></label><input id="deadline" name="deadline" type="date" required aria-describedby="deadline-hint" value="<?= $v('deadline') ?>"><p class="hint" id="deadline-hint">お申し込み日を除いて4営業日後となります。</p><p class="file-error" id="deadline-error" role="alert"></p></div>
+        <div class="field"><label for="deadline">図面の希望納期<span class="req">必須</span></label><input id="deadline" name="deadline" type="date" required aria-describedby="deadline-hint" value="<?= $v('deadline') ?>"><p class="hint" id="deadline-hint">お申し込み日を除いて4営業日かかり、その翌営業日の納品となります。</p><p class="file-error" id="deadline-error" role="alert"></p></div>
         <div class="field"><label for="rush">納期の短縮<span class="req">必須</span></label><select id="rush" name="rush" required aria-describedby="rush-hint">
           <?php foreach (array_keys(RUSH_OPTIONS) as $rush): ?><option<?= ($values['rush'] ?? '') === $rush ? ' selected' : '' ?>><?= h($rush) ?></option><?php endforeach; ?>
-        </select><p class="hint" id="rush-hint">納期の短縮には追加料金がかかります。</p></div>
+        </select><p class="hint" id="rush-hint">納期の短縮には追加料金がかかります。希望納期に合わせて自動で選ばれます。</p></div>
       </div>
       <?php
       // 短縮の選択肢ごとの納品予定日。いまの時刻の分と、今日の営業時間を過ぎた後の分。
@@ -236,10 +236,26 @@ page_start('お問い合わせ | BAQOOL サポート');
   const error = document.getElementById('deadline-error');
   const jp = date => { const [y, m, d] = date.split('-').map(Number); return date.replaceAll('-', '/') + '（' + '日月火水木金土'[new Date(y, m - 1, d).getDay()] + '）'; };
   let mismatch = false;
+  const current = () => (lateAt !== null && Date.now() >= lateAt ? late : early);
+  const NONE = '希望しない';
+  // 納期の短縮を選んだら、希望納期をその日付にする
+  const followRush = () => {
+    const rush = form.elements.rush.value;
+    if (rush !== NONE && current()[rush]) form.elements.deadline.value = current()[rush];
+  };
+  // 希望納期が通常の納期より早ければ、間に合う短縮を自動で選ぶ。通常の納期以降なら短縮を外す
+  const followDeadline = () => {
+    const dates = current();
+    const wish = form.elements.deadline.value;
+    if (!wish) return;
+    if (wish >= dates[NONE]) { form.elements.rush.value = NONE; return; }
+    const rush = Object.keys(dates).filter(key => key !== NONE).sort((a, b) => (dates[a] < dates[b] ? -1 : 1)).find(key => dates[key] >= wish);
+    if (rush) { form.elements.rush.value = rush; form.elements.deadline.value = dates[rush]; }
+  };
   const show = () => {
     const rush = form.elements.rush.value;
     const wish = form.elements.deadline.value;
-    const dates = lateAt !== null && Date.now() >= lateAt ? late : early;
+    const dates = current();
     let date = dates[rush] || dates['希望しない'];
     if (rush === '希望しない' && wish > date) date = wish; // 短縮なしで、希望納期のほうが後ならそちら
     out.textContent = jp(date);
@@ -250,14 +266,31 @@ page_start('お問い合わせ | BAQOOL サポート');
     form.elements.deadline.classList.toggle('invalid', mismatch);
     form.elements.rush.classList.toggle('invalid', mismatch);
   };
-  form.elements.rush.addEventListener('change', show);
-  form.elements.deadline.addEventListener('change', show);
+  form.elements.rush.addEventListener('change', () => { followRush(); show(); });
+  form.elements.deadline.addEventListener('change', () => { followDeadline(); show(); });
   form.addEventListener('submit', event => { // 確認画面を出す直前にも計算し直す
     show();
     if (mismatch) { event.preventDefault(); form.elements.deadline.focus(); }
   });
   setInterval(show, 30000);
   show();
+})();
+
+// 完工予定日が着工予定日より後でなければ、赤く知らせて送信させない。
+(() => {
+  const error = document.getElementById('finish-error');
+  if (!error) return;
+  const form = error.closest('form');
+  const { start, finish } = form.elements;
+  const check = () => {
+    const bad = start.value !== '' && finish.value !== '' && finish.value <= start.value;
+    error.textContent = bad ? '完工予定日は、着工予定日より後の日付にしてください。' : '';
+    finish.classList.toggle('invalid', bad);
+    return bad;
+  };
+  start.addEventListener('change', check);
+  finish.addEventListener('change', check);
+  form.addEventListener('submit', event => { if (check()) { event.preventDefault(); finish.focus(); } });
 })();
 
 // 送信前に、入力内容を確認する画面を出す。JavaScript が動かないブラウザでは、そのまま送信される。

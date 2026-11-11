@@ -78,6 +78,8 @@ try {
   [, , $h2] = request('index.php');
   check('nonce changes on every request', ($h2['content-security-policy'] ?? '') !== $csp);
   check('file input works without JavaScript too', strpos($body, 'name="drawing[]"') !== false && strpos($body, 'multiple required') !== false);
+  check('expected delivery date is shown with both date sets', preg_match('/id="delivery-date"[^>]*>\d{4}\/\d{2}\/\d{2}（.）</u', $body) === 1 &&
+    strpos($body, 'data-late-dates=') !== false && strpos($body, 'data-late-in=') !== false);
   check('old heading is gone', strpos($body, 'お申し込みフォーム') === false && strpos($body, 'お申し込み受付') === false);
 
   $post = $form();

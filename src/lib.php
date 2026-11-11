@@ -189,6 +189,12 @@ function max_total_size(): int { return min(MAX_TOTAL_SIZE, ini_bytes('post_max_
 
 function format_mb(int $bytes): string { return rtrim(rtrim(number_format($bytes / 1024 / 1024, 1), '0'), '.') . 'MB'; }
 
+/** 現在の日本時間。.env の TEST_NOW(例: 2026-11-13 17:31)があればその時刻として動く(動作確認用。本番では設定しない) */
+function now_tokyo(): DateTimeImmutable {
+  $test = env()['TEST_NOW'] ?? '';
+  return new DateTimeImmutable($test !== '' ? $test : 'now', new DateTimeZone('Asia/Tokyo'));
+}
+
 function is_business_day(DateTimeImmutable $d): bool {
   return (int) $d->format('N') < 6 && !in_array($d->format('Y-m-d'), HOLIDAYS, true);
 }
@@ -203,7 +209,7 @@ function add_business_days(DateTimeImmutable $d, int $n): DateTimeImmutable {
  * 短縮なしは4営業日後。希望納期がそれより後なら希望納期。短縮ありは選んだ営業日数後。
  */
 function delivery_date(string $rush, string $deadline, ?DateTimeImmutable $now = null): string {
-  $now = $now ?? new DateTimeImmutable('now', new DateTimeZone('Asia/Tokyo'));
+  $now = $now ?? now_tokyo();
   $received = $now->setTime(0, 0);
   if (!is_business_day($received) || $now->format('H:i') > BUSINESS_CLOSE) $received = add_business_days($received, 1);
   $days = RUSH_OPTIONS[$rush] ?? RUSH_OPTIONS['希望しない'];

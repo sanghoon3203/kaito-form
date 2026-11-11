@@ -93,8 +93,20 @@ page_start('お問い合わせ | BAQOOL サポート');
           <?php foreach (array_keys(RUSH_OPTIONS) as $rush): ?><option<?= ($values['rush'] ?? '') === $rush ? ' selected' : '' ?>><?= h($rush) ?></option><?php endforeach; ?>
         </select><p class="hint" id="rush-hint">納期の短縮には追加料金がかかります。</p></div>
       </div>
-      <?php $deliveryDates = array_map(function ($rush) { return delivery_date($rush, ''); }, array_combine(array_keys(RUSH_OPTIONS), array_keys(RUSH_OPTIONS))); ?>
-      <div class="field delivery" id="delivery" data-dates="<?= h(json_encode($deliveryDates, JSON_UNESCAPED_UNICODE)) ?>">
+      <?php
+      // 短縮の選択肢ごとの納品予定日。いまの時刻の分と、今日の営業時間を過ぎた後の分。
+      // 画面を開いたまま営業時間を過ぎたら、JavaScript が後者に切り替える(送信時には PHP が計算し直す)
+      $now = now_tokyo();
+      $datesAt = function (DateTimeImmutable $at) {
+        $out = [];
+        foreach (array_keys(RUSH_OPTIONS) as $rush) $out[$rush] = delivery_date($rush, '', $at);
+        return $out;
+      };
+      $closesAt = $now->modify(BUSINESS_CLOSE)->modify('+1 minute');
+      $lateIn = is_business_day($now) && $now < $closesAt ? ($closesAt->getTimestamp() - $now->getTimestamp()) * 1000 : '';
+      ?>
+      <div class="field delivery" id="delivery" data-dates="<?= h(json_encode($datesAt($now), JSON_UNESCAPED_UNICODE)) ?>"
+        data-late-dates="<?= h(json_encode($datesAt($now->setTime(23, 59)), JSON_UNESCAPED_UNICODE)) ?>" data-late-in="<?= h((string) $lateIn) ?>">
         <span class="label">納品予定日（目安）</span>
         <p class="delivery-date"><output id="delivery-date" for="deadline rush"><?= h(jp_date(delivery_date($values['rush'] ?? '', $values['deadline'] ?? ''))) ?></output></p>
         <p class="hint">受付時間（平日 8:30〜17:30）を過ぎたお申し込みは、翌営業日の受付として計算します。</p>
@@ -216,12 +228,15 @@ page_start('お問い合わせ | BAQOOL サポート');
 (() => {
   const box = document.getElementById('delivery');
   if (!box) return;
-  const dates = JSON.parse(box.dataset.dates);
+  const early = JSON.parse(box.dataset.dates);
+  const late = JSON.parse(box.dataset.lateDates);
+  const lateAt = box.dataset.lateIn === '' ? null : Date.now() + Number(box.dataset.lateIn); // 今日の営業時間が終わる時刻
   const form = box.closest('form');
   const out = document.getElementById('delivery-date');
   const show = () => {
     const rush = form.elements.rush.value;
     const wish = form.elements.deadline.value;
+    const dates = lateAt !== null && Date.now() >= lateAt ? late : early;
     let date = dates[rush] || dates['希望しない'];
     if (rush === '希望しない' && wish > date) date = wish; // 短縮なしで、希望納期のほうが後ならそちら
     const [y, m, d] = date.split('-').map(Number);
@@ -229,6 +244,8 @@ page_start('お問い合わせ | BAQOOL サポート');
   };
   form.elements.rush.addEventListener('change', show);
   form.elements.deadline.addEventListener('change', show);
+  form.addEventListener('submit', show); // 確認画面を出す直前にも計算し直す
+  setInterval(show, 30000);
   show();
 })();
 

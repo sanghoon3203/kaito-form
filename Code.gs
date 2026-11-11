@@ -167,8 +167,10 @@ function appendByHeader(sheet, entries, memo, note, { insideLastRow = false, fir
 
 // 備考は既存の行と同じく短くする。連絡先・住所・予定日・図面のリンクは、受付一覧と通知メールに残す
 const warningLines = data => (data.warnings || []).map(w => '【要注意】' + w);
-// 希望納期は設計用・顧客管理の「図面納品日」に書く。短縮を選んだときだけ、備考にその内容を書く
-const rushLine = data => (data.rush && data.rush !== '希望しない' ? '納期短縮：' + data.rush : '');
+// 納品予定日(PHP が営業日で計算)は設計用・顧客管理の「図面納品日」に書く。短縮を選んだときだけ、備考にその内容を書く
+// 例:納期短縮：1営業日（+3万円）
+const rushLine = data => (data.rush && data.rush !== '希望しない'
+  ? '納期短縮：' + data.rush.replace('翌営業日', '1営業日').replace('営業日後', '営業日') : '');
 
 function appendCaseRow(props, data, folderUrl) {
   const sheet = openCaseSheet(props);
@@ -191,7 +193,7 @@ function appendDesignRow(props, data, folderUrl) {
     ['顧客名', data.projectName],
     ['依頼者', data.contact],
     ['PDF依頼日', day(Utilities.formatDate(new Date(), 'Asia/Tokyo', 'yyyy-MM-dd')), 'yy/mm/dd'],
-    ['図面納品日', day(data.deadline), 'yy/mm/dd'], // 図面の希望納期
+    ['図面納品日', day(data.delivery || data.deadline), 'yy/mm/dd'], // 納品予定日
     ['引渡日', day(data.finish ? data.finish.slice(0, 8) + '01' : ''), 'yy/mm'], // 完工予定日の年月だけ
     ['案件番号', data.caseNumber],
     ['床下暖房種別', data.heating], // ロゴスホームにだけある列。ほかのタブでは備考に入る
@@ -325,18 +327,18 @@ function saveUploadReceipt(props, data) {
     }
     if (sheet.getLastRow() === 0) {
       sheet.appendRow(['受付日時', '会社名', '担当者', 'メールアドレス', '着工予定日', '完工予定日', '添付ファイル名', '添付ファイルリンク',
-        '保存フォルダ', '支店名', '案件名', '案件住所', '床下暖房種別', '備考', '要注意', '図面の希望納期', '納期の短縮', '案件番号']);
+        '保存フォルダ', '支店名', '案件名', '案件住所', '床下暖房種別', '備考', '要注意', '図面の希望納期', '納期の短縮', '案件番号', '納品予定日']);
     }
     // 受付日時は日本時間の文字列で書く(Date のまま渡すと、スクリプトのタイムゾーンの時刻で入る)
     sheet.appendRow([Utilities.formatDate(new Date(), 'Asia/Tokyo', 'yyyy/MM/dd HH:mm:ss'), safe(data.company), safe(data.contact), safe(data.email), safe(data.start), safe(data.finish),
       safe(data.files.map(file => file.name).join('\n')), joinedLinks, folderUrl,
       safe(data.branch), safe(data.projectName), safe(data.projectAddress), safe(data.heating), safe(data.note),
-      safe(data.warnings.join('\n')), safe(data.deadline), safe(data.rush), data.caseNumber]);
+      safe(data.warnings.join('\n')), safe(data.deadline), safe(data.rush), data.caseNumber, safe(data.delivery)]);
     if (sheet.getRange('J1').getValue() === '') {
       sheet.getRange('J1:N1').setValues([['支店名', '案件名', '案件住所', '床下暖房種別', '備考']]);
     }
     if (sheet.getRange('P1').getValue() === '') sheet.getRange('P1:Q1').setValues([['図面の希望納期', '納期の短縮']]);
-    if (sheet.getRange('R1').getValue() === '') sheet.getRange('R1').setValue('案件番号');
+    if (sheet.getRange('R1').getValue() === '') sheet.getRange('R1:S1').setValues([['案件番号', '納品予定日']]);
     if (sheet.getRange('F1').getValue() === '工事完了予定日') sheet.getRange('F1').setValue('完工予定日');
     if (sheet.getRange('O1').getValue() === '') sheet.getRange('O1').setValue('要注意');
     if (fileLinks.length > 1) {
@@ -431,6 +433,7 @@ function notifyReceipt(data, filenames, folderUrl, spreadsheetUrl, caseResult, d
     '完工予定日　' + (oneLine(data.finish) || '未定'),
     '図面の希望納期　' + (oneLine(data.deadline) || '-'),
     '納期の短縮　' + (oneLine(data.rush) || '希望しない'),
+    '納品予定日　' + (oneLine(data.delivery) || '-'),
     '',
     '添付ファイル（' + filenames.length + '件）',
     ...filenames.map(name => '・' + oneLine(name)),

@@ -8,7 +8,13 @@ const MAX_TOTAL_SIZE = 80 * 1024 * 1024; // 1回の送信で添付できる合�
 const MAX_FILES = 10;                    // PDF と JWW を合わせた個数
 const FILE_SIGNATURES = ['pdf' => '%PDF-', 'jww' => 'JwwData.']; // ファイル先頭の決まった文字列
 const HEATING_TYPES = ['放熱器', 'AC', 'ﾌｧﾝｺﾝﾍﾞｸﾀｰ']; // 案件基本情報「床下暖房種別」のプルダウンと同じ表記
-const RUSH_OPTIONS = ['希望しない', '翌営業日（+3万円）', '2営業日後（+2万円）', '3営業日後（+1万円）'];
+// 納期の短縮の選択肢 => 受付日から納品までの営業日数
+const RUSH_OPTIONS = ['希望しない' => 4, '翌営業日（+3万円）' => 1, '2営業日後（+2万円）' => 2, '3営業日後（+1万円）' => 3];
+const BUSINESS_CLOSE = '17:30'; // 営業時間は平日 8:30〜17:30。これを過ぎた申し込みは翌営業日の受付
+// 土日のほかに休む日(国民の祝日)。年末年始などの休業日や、2028年以降の祝日はここに足す
+const HOLIDAYS = ['2026-11-23', '2027-01-01', '2027-01-11', '2027-02-11', '2027-02-23', '2027-03-22', '2027-04-29',
+  '2027-05-03', '2027-05-04', '2027-05-05', '2027-07-19', '2027-08-11', '2027-09-20', '2027-09-23', '2027-10-11',
+  '2027-11-03', '2027-11-23'];
 const PREFECTURES = ['北海道', '青森県', '岩手県', '宮城県', '秋田県', '山形県', '福島県', '茨城県', '栃木県', '群馬県', '埼玉県',
   '千葉県', '東京都', '神奈川県', '新潟県', '富山県', '石川県', '福井県', '山梨県', '長野県', '岐阜県', '静岡県', '愛知県', '三重県',
   '滋賀県', '京都府', '大阪府', '兵庫県', '奈良県', '和歌山県', '鳥取県', '島根県', '岡山県', '広島県', '山口県', '徳島県', '香川県',
@@ -183,6 +189,35 @@ function max_total_size(): int { return min(MAX_TOTAL_SIZE, ini_bytes('post_max_
 
 function format_mb(int $bytes): string { return rtrim(rtrim(number_format($bytes / 1024 / 1024, 1), '0'), '.') . 'MB'; }
 
+function is_business_day(DateTimeImmutable $d): bool {
+  return (int) $d->format('N') < 6 && !in_array($d->format('Y-m-d'), HOLIDAYS, true);
+}
+
+function add_business_days(DateTimeImmutable $d, int $n): DateTimeImmutable {
+  while ($n > 0) { $d = $d->modify('+1 day'); if (is_business_day($d)) $n--; }
+  return $d;
+}
+
+/**
+ * 図面の納品予定日(Y-m-d)。受付日(営業時間を過ぎていれば翌営業日)を除いて数える。
+ * 短縮なしは4営業日後。希望納期がそれより後なら希望納期。短縮ありは選んだ営業日数後。
+ */
+function delivery_date(string $rush, string $deadline, ?DateTimeImmutable $now = null): string {
+  $now = $now ?? new DateTimeImmutable('now', new DateTimeZone('Asia/Tokyo'));
+  $received = $now->setTime(0, 0);
+  if (!is_business_day($received) || $now->format('H:i') > BUSINESS_CLOSE) $received = add_business_days($received, 1);
+  $days = RUSH_OPTIONS[$rush] ?? RUSH_OPTIONS['希望しない'];
+  $date = add_business_days($received, $days)->format('Y-m-d');
+  $noRush = $days === RUSH_OPTIONS['希望しない'];
+  return $noRush && preg_match('/^\d{4}-\d{2}-\d{2}$/D', $deadline) && $deadline > $date ? $deadline : $date;
+}
+
+/** 2026-11-17 → 2026/11/17（火） */
+function jp_date(string $ymd): string {
+  $d = new DateTimeImmutable($ymd);
+  return $d->format('Y/m/d') . '（' . ['日', '月', '火', '水', '木', '金', '土'][(int) $d->format('w')] . '）';
+}
+
 /** @return array{0: array, 1: string[]} 整えた入力値とエラーメッセージ */
 function validate_fields(array $post): array {
   $limits = ['company' => 100, 'branch' => 100, 'contact' => 100, 'email' => 254, 'projectSei' => 50, 'projectMei' => 50,
@@ -208,7 +243,7 @@ function validate_fields(array $post): array {
   }
   if ($fields['heating'] !== '' && $fields['heating'] !== '未定' && !in_array($fields['heating'], HEATING_TYPES, true)) $errors[] = '床下暖房種別をご確認ください。';
   if ($fields['pref'] !== '' && !in_array($fields['pref'], PREFECTURES, true)) $errors[] = '都道府県をご確認ください。';
-  if ($fields['rush'] !== '' && !in_array($fields['rush'], RUSH_OPTIONS, true)) $errors[] = '納期の短縮をご確認ください。';
+  if ($fields['rush'] !== '' && !isset(RUSH_OPTIONS[$fields['rush']])) $errors[] = '納期の短縮をご確認ください。';
   foreach (['start' => '着工予定日', 'finish' => '完工予定日', 'deadline' => '図面の希望納期'] as $name => $label) {
     $d = explode('-', $fields[$name]);
     if ($fields[$name] !== '' && !(preg_match('/^\d{4}-\d{2}-\d{2}$/D', $fields[$name]) && checkdate((int) $d[1], (int) $d[2], (int) $d[0]))) {
@@ -219,6 +254,7 @@ function validate_fields(array $post): array {
   $fields['projectName'] = $fields['projectSei'] . '　' . $fields['projectMei']; // 既存の行と同じく全角スペース
   $fields['projectAddress'] = $fields['pref'] . $fields['city'] . $fields['street'];
   if ($fields['heating'] === '未定') $fields['heating'] = ''; // 案件管理表では空欄が未定
+  $fields['delivery'] = delivery_date($fields['rush'], $fields['deadline']); // 納品予定日は送信された時刻で決める
   return [$fields, array_values(array_unique($errors))];
 }
 

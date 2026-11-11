@@ -73,7 +73,7 @@ function run(sheet, data) {
 const HEADERS = ['案件番号', 'ステータス', '顧客名', '顧客支店名', '顧客住所（自動）', '顧客電話番号（自動）', '案件名', '案件住所',
   '取引種別', '営業担当', '床下暖房種別', '備考', '契約金額（税抜）', '契約金額（税込）', '契約日', '着工予定日', '完工予定日'];
 const DATA = { company: '=テスト工務店', branch: '大阪支店', contact: '山田', email: 'y@example.com', projectName: '山田様邸',
-  projectAddress: '大阪市1-2-3', heating: 'AC', start: '2026-12-01', finish: '2026-12-20', deadline: '2026-11-20', rush: '翌営業日（+3万円）', note: '至急' };
+  projectAddress: '大阪市1-2-3', heating: 'AC', start: '2026-12-01', finish: '2026-12-20', deadline: '2026-11-20', rush: '翌営業日（+3万円）', delivery: '2026-11-12', note: '至急' };
 
 // 1. 通常: ヘッダー名どおりの列に入り、自動列は数式をコピーする
 let s = fakeSheet(HEADERS, [['B25-001', '受注', 'A社', '', '', '', '既存案件']], { formulas: { '2,5': '=VLOOKUP(R[0]C[-2],x,2,0)' } });
@@ -194,10 +194,10 @@ assert.strictEqual(hoei.formats['4,' + (h('PDF依頼日') + 1)], 'yy/mm/dd');
 const handover = hoei.cells[3][h('引渡日')];
 assert.ok(handover.getFullYear() === 2027 && handover.getMonth() === 1 && handover.getDate() === 1 && hoei.formats['4,' + (h('引渡日') + 1)] === 'yy/mm');
 assert.ok(['作図担当', 'ステータス', '設計料(税抜)'].every(n => !hoei.cells[3][h(n)]), 'internal columns stay blank');
-assert.ok(lastParsed.includes('2026-11-20@America/Los_Angeles') && hoei.formats['4,' + (h('図面納品日') + 1)] === 'yy/mm/dd', '希望納期 goes to 図面納品日');
+assert.ok(lastParsed.includes('2026-11-12@America/Los_Angeles') && hoei.formats['4,' + (h('図面納品日') + 1)] === 'yy/mm/dd', '納品予定日 goes to 図面納品日');
 const delivery = hoei.cells[3][h('図面納品日')];
-assert.ok(delivery.getFullYear() === 2026 && delivery.getMonth() === 10 && delivery.getDate() === 20);
-assert.strictEqual(hoei.cells[3][h('備考')], ['納期短縮：翌営業日（+3万円）', '支店名：大阪支店', '床下暖房種別：AC', '至急'].join(String.fromCharCode(10)));
+assert.ok(delivery.getFullYear() === 2026 && delivery.getMonth() === 10 && delivery.getDate() === 12);
+assert.strictEqual(hoei.cells[3][h('備考')], ['納期短縮：1営業日（+3万円）', '支店名：大阪支店', '床下暖房種別：AC', '至急'].join(String.fromCharCode(10)));
 assert.strictEqual(caseSheet.cells[2][HEADERS.indexOf('案件番号')], 'B2611-010', 'same number in 案件管理表');
 // ロゴスは半角カナでも当たり、床下暖房種別の列に入る
 runDesign({ ...DATA, company: 'ﾛｺﾞｽﾎｰﾑ', projectName: '田中 花子' });

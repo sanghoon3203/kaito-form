@@ -88,10 +88,16 @@ page_start('お問い合わせ | BAQOOL サポート');
         <div class="field"><label for="finish">完工予定日<span class="req">必須</span></label><input id="finish" name="finish" type="date" required aria-describedby="finish-hint" value="<?= $v('finish') ?>"><p class="hint" id="finish-hint">おおよその日付で構いません。</p></div>
       </div>
       <div class="grid">
-        <div class="field"><label for="deadline">図面の希望納期<span class="req">必須</span></label><input id="deadline" name="deadline" type="date" required aria-describedby="deadline-hint" value="<?= $v('deadline') ?>"><p class="hint" id="deadline-hint">図面の作成には、通常4営業日ほどかかります。</p></div>
+        <div class="field"><label for="deadline">図面の希望納期<span class="req">必須</span></label><input id="deadline" name="deadline" type="date" required aria-describedby="deadline-hint" value="<?= $v('deadline') ?>"><p class="hint" id="deadline-hint">お申し込み日を除いて4営業日後となります。</p></div>
         <div class="field"><label for="rush">納期の短縮<span class="req">必須</span></label><select id="rush" name="rush" required aria-describedby="rush-hint">
-          <?php foreach (RUSH_OPTIONS as $rush): ?><option<?= ($values['rush'] ?? '') === $rush ? ' selected' : '' ?>><?= h($rush) ?></option><?php endforeach; ?>
+          <?php foreach (array_keys(RUSH_OPTIONS) as $rush): ?><option<?= ($values['rush'] ?? '') === $rush ? ' selected' : '' ?>><?= h($rush) ?></option><?php endforeach; ?>
         </select><p class="hint" id="rush-hint">納期の短縮には追加料金がかかります。</p></div>
+      </div>
+      <?php $deliveryDates = array_map(function ($rush) { return delivery_date($rush, ''); }, array_combine(array_keys(RUSH_OPTIONS), array_keys(RUSH_OPTIONS))); ?>
+      <div class="field delivery" id="delivery" data-dates="<?= h(json_encode($deliveryDates, JSON_UNESCAPED_UNICODE)) ?>">
+        <span class="label">納品予定日（目安）</span>
+        <p class="delivery-date"><output id="delivery-date" for="deadline rush"><?= h(jp_date(delivery_date($values['rush'] ?? '', $values['deadline'] ?? ''))) ?></output></p>
+        <p class="hint">受付時間（平日 8:30〜17:30）を過ぎたお申し込みは、翌営業日の受付として計算します。</p>
       </div>
       <div class="field"><label for="note">備考</label><textarea id="note" name="note" maxlength="1000"><?= $v('note') ?></textarea></div>
     </div>
@@ -206,6 +212,26 @@ page_start('お問い合わせ | BAQOOL サポート');
   });
 })();
 
+// 納品予定日(目安)を、納期の短縮と希望納期に合わせて表示し直す。日付は PHP が営業日で計算したものを使う。
+(() => {
+  const box = document.getElementById('delivery');
+  if (!box) return;
+  const dates = JSON.parse(box.dataset.dates);
+  const form = box.closest('form');
+  const out = document.getElementById('delivery-date');
+  const show = () => {
+    const rush = form.elements.rush.value;
+    const wish = form.elements.deadline.value;
+    let date = dates[rush] || dates['希望しない'];
+    if (rush === '希望しない' && wish > date) date = wish; // 短縮なしで、希望納期のほうが後ならそちら
+    const [y, m, d] = date.split('-').map(Number);
+    out.textContent = date.replaceAll('-', '/') + '（' + '日月火水木金土'[new Date(y, m - 1, d).getDay()] + '）';
+  };
+  form.elements.rush.addEventListener('change', show);
+  form.elements.deadline.addEventListener('change', show);
+  show();
+})();
+
 // 送信前に、入力内容を確認する画面を出す。JavaScript が動かないブラウザでは、そのまま送信される。
 (() => {
   const dialog = document.getElementById('confirm');
@@ -225,7 +251,8 @@ page_start('お問い合わせ | BAQOOL サポート');
       ['会社名', val('company')], ['支店名', val('branch')], ['ご担当者名', val('contact')], ['メールアドレス', val('email')],
       ['案件名', val('projectSei') + '　' + val('projectMei')], ['案件住所', val('pref') + val('city') + val('street')],
       ['床下暖房種別', heating()], ['着工予定日', date('start')], ['完工予定日', date('finish')],
-      ['図面の希望納期', date('deadline')], ['納期の短縮', val('rush')], ['備考', val('note') || 'なし'],
+      ['図面の希望納期', date('deadline')], ['納期の短縮', val('rush')],
+      ['納品予定日（目安）', document.getElementById('delivery-date').textContent], ['備考', val('note') || 'なし'],
       ['図面ファイル', [...document.getElementById('drawing').files].map(f => f.name).join('\n')],
     ];
     list.replaceChildren(...rows.flatMap(([label, value]) => {

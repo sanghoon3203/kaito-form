@@ -113,6 +113,7 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--accent);
 .button.secondary{background:var(--soft)}
 .button:disabled{opacity:.6;cursor:default}
 @media(max-width:734px){.confirm{padding:24px 20px}.confirm dl{grid-template-columns:1fr}.confirm dd{border-top:0;padding-top:0}.confirm-actions{flex-direction:column-reverse}}
+.delivery-date{margin:0;font-size:20px;font-weight:700}
 .cf-turnstile{display:flex;justify-content:center;min-height:65px;margin-bottom:20px}
 .link-button{display:inline-block;text-decoration:none;font-weight:700;color:var(--text);background:var(--accent);border-radius:999px;padding:12px 32px}
 

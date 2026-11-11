@@ -85,7 +85,7 @@ try {
   check('valid submission redirects to complete page', $s === 303 && ($h['location'] ?? '') === 'complete.php', "status $s " . strip_tags(substr($body, 0, 300)));
   $done = json_decode((string) @file_get_contents("$tmp/kaito-mock-finish.json"), true);
   check('finish sends all case fields', ($done['projectAddress'] ?? '') === '大阪府大阪市1-2-3' && ($done['heating'] ?? '') === 'ﾌｧﾝｺﾝﾍﾞｸﾀｰ' &&
-    ($done['projectName'] ?? '') === '山田　太郎' && ($done['finish'] ?? '') === '2026-12-20' && ($done['rush'] ?? '') === '2営業日後（+2万円）' &&
+    ($done['projectName'] ?? '') === '山田　太郎' && ($done['finish'] ?? '') === '2026-12-20' && ($done['rush'] ?? '') === '2営業日後（+2万円）' && preg_match('/^\d{4}-\d{2}-\d{2}$/', $done['delivery'] ?? '') === 1 &&
     ($done['folderId'] ?? '') === 'FOLDER' && count($done['files'] ?? []) === 2 && !isset($done['website']) && !isset($done['token']));
   check('files reach Drive unchanged', @file_get_contents("$tmp/kaito-upload-ID0.bin") === $pdf && @file_get_contents("$tmp/kaito-upload-ID1.bin") === $jww);
 

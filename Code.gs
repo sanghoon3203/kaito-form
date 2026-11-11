@@ -1,15 +1,22 @@
 // Script properties: ROOT_FOLDER_ID, SHEET_ID, SHARED_SECRET, NOTIFY_EMAIL,
-// CASE_SHEET_ID(案件管理表。未設定なら書き込まない), CASE_SHEET_NAME(省略時「案件基本情報」).
+// CASE_SHEET_ID(案件管理表。未設定なら書き込まない), CASE_SHEET_NAME(省略時「案件基本情報」),
+// DESIGN_SHEET_ID(設計用・顧客管理。未設定なら書き込まない).
 function doPost(e) {
   const output = value => ContentService.createTextOutput(JSON.stringify(value)).setMimeType(ContentService.MimeType.JSON);
+  let authed = false;
   try {
     const props = PropertiesService.getScriptProperties();
     const data = JSON.parse(e.postData.contents);
     if (!props.getProperty('SHARED_SECRET') || data.secret !== props.getProperty('SHARED_SECRET')) return output({ok:false});
+    authed = true;
     if (data.action === 'prepare') return output(prepareDriveUploads(props, data));
     if (data.action === 'finish') return output(saveUploadReceipt(props, data));
     return output({ok:false});
-  } catch(error) { console.error('Submission failed'); return output({ok:false}); }
+  } catch(error) {
+    console.error('Submission failed: ' + (error && error.stack || error));
+    // 原因は SHARED_SECRET を知っている呼び出し元(PHP)にだけ返す。PHP はサーバーのログに残す
+    return output(authed ? {ok:false, error: String(error && error.message || error).slice(0, 300)} : {ok:false});
+  }
 }
 
 // Script Properties の ID は、ブラウザのアドレス欄の URL をそのまま貼ってもよい
@@ -22,26 +29,74 @@ function idProperty(props, key) {
 
 const safeCell = value => { const s = String(value || ''); return /^[=+\-@\t\r]/.test(s) ? "'" + s : s; };
 
-// 案件基本情報に1行追加する。列は1行目のヘッダー名で探すので、列の追加や並べ替えがあっても正しい列に入る。
-// 書くのは下の CASE_COLUMNS と「備考」だけ。顧客住所(自動)などの自動列には値を書かず、直前の行に数式があれば同じ数式を入れる。
-// ヘッダーが見つからない値や、プルダウンの入力規則で拒否された値は、備考へ回す。
+// 書き込み先は2つ。どちらも列は1行目のヘッダー名で探すので、列の追加や並べ替えがあっても正しい列に入る。
+// ・案件管理表「案件基本情報」(CASE_SHEET_ID)
+// ・設計用・顧客管理(DESIGN_SHEET_ID)。会社名でタブを選び、どれにも当たらなければ「その他」
+// 案件番号は受付ごとに1つ作り(B + 年月 + - + 3桁の連番。月ごとに001から)、両方に同じ番号を書く。
 const CASE_COLUMNS = [
+  ['案件番号', data => data.caseNumber],
   ['顧客名', data => data.company],
   ['顧客支店名', data => data.branch],
   ['案件名', data => data.projectName],
   ['案件住所', data => data.projectAddress],
   ['床下暖房種別', data => data.heating],
   ['着工予定日', data => data.start],
+  ['完工予定日', data => data.finish],
 ];
-const CASE_DATE_COLUMNS = ['着工予定日'];
+const CASE_DATE_COLUMNS = ['着工予定日', '完工予定日'];
+const DESIGN_TABS = { '豊栄': '豊栄建設', 'ロゴス': 'ロゴスホーム', '生杉': '生杉建設', '竹内': '竹内建設' };
 
-function appendCaseRow(props, data, folderUrl) {
+// 日付は「yyyy-MM-dd」の暦日のまま渡し、書き込むときにシートのタイムゾーンで日付にする
+// (スクリプトとシートのタイムゾーンが違うと、new Date(y, m, d) では1日ずれる)
+const day = s => (s ? { day: String(s) } : '');
+// プルダウンの選択肢と照らすときは、株式会社・㈱・空白などの違いを無視する
+const looseName = s => String(s).normalize('NFKC').replace(/株式会社|有限会社|合同会社|\((株|有|同)\)|[\s　]/g, '');
+const headersOf = sheet => sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].map(h => String(h).replace(/[\s　]/g, ''));
+
+function openCaseSheet(props) {
   const id = idProperty(props, 'CASE_SHEET_ID');
-  if (!id) return 'skipped';
+  if (!id) return null;
   const sheet = SpreadsheetApp.openById(id).getSheetByName(props.getProperty('CASE_SHEET_NAME') || '案件基本情報');
   if (!sheet) throw new Error('Case sheet not found');
+  return sheet;
+}
+
+function openDesignTabs(props) {
+  const id = idProperty(props, 'DESIGN_SHEET_ID');
+  if (!id) return [];
+  const book = SpreadsheetApp.openById(id);
+  return [...Object.values(DESIGN_TABS), 'その他'].map(name => book.getSheetByName(name)).filter(Boolean);
+}
+
+function designTabName(company) {
+  const name = String(company || '').normalize('NFKC'); // 半角カナの「ﾛｺﾞｽ」なども当てる
+  const key = Object.keys(DESIGN_TABS).find(k => name.includes(k));
+  return key ? DESIGN_TABS[key] : 'その他';
+}
+
+// 今月の案件番号のうち、渡したすべてのシートで一番大きいものの次。呼び出し側でスクリプトのロックを取っておく
+function nextCaseNumber(sheets) {
+  const prefix = 'B' + Utilities.formatDate(new Date(), 'Asia/Tokyo', 'yyMM') + '-';
+  let max = 0;
+  sheets.forEach(sheet => {
+    const col = headersOf(sheet).indexOf('案件番号') + 1;
+    const rows = sheet.getLastRow();
+    if (!col || rows < 2) return;
+    sheet.getRange(2, col, rows - 1, 1).getValues().forEach(([value]) => {
+      const text = String(value).trim();
+      if (text.startsWith(prefix) && /^\d+$/.test(text.slice(prefix.length))) max = Math.max(max, Number(text.slice(prefix.length)));
+    });
+  });
+  return prefix + String(max + 1).padStart(3, '0');
+}
+
+// 1行追加する。entries は [ヘッダー名(別名があれば配列), 値, 表示形式]。値を書かないヘッダーの列には触らず、
+// 直前の行に数式があれば同じ数式を入れる。ヘッダーが見つからない値や、入力規則に拒否された値は備考へ回す。
+// insideLastRow: 最終行の上に行を挿入してから最終行と入れ替える。集計式の範囲(…:最終行)を新しい行まで広げるため。
+function appendByHeader(sheet, entries, memo, note, { insideLastRow = false, firstHeader = '' } = {}) {
   const lastColumn = sheet.getLastColumn();
-  const headers = sheet.getRange(1, 1, 1, lastColumn).getValues()[0].map(h => String(h).replace(/[\s　]/g, ''));
+  const headers = headersOf(sheet);
+  if (firstHeader && !headers[0]) headers[0] = firstHeader; // 1列目の見出しが空のタブ
   const colOf = name => headers.indexOf(name) + 1; // 見つからなければ 0
   if (!colOf('備考')) throw new Error('備考 column not found');
 
@@ -51,33 +106,98 @@ function appendCaseRow(props, data, folderUrl) {
     const bottom = sheet.getRange(maxRows, col);
     return bottom.getValue() !== '' ? maxRows : bottom.getNextDataCell(SpreadsheetApp.Direction.UP).getRow();
   };
-  const last = Math.max(lastIn(colOf('案件番号')), lastIn(colOf('顧客名')), lastIn(colOf('案件名')));
-  if (last >= maxRows) sheet.insertRowAfter(last);
+  const last = Math.max(...[...entries.flatMap(([names]) => [].concat(names)), '備考'].map(name => lastIn(colOf(name))));
   const row = last + 1;
+  if (insideLastRow && last > 1) {
+    sheet.insertRowBefore(last);
+    const moved = sheet.getRange(row, 1, 1, lastColumn); // 元の最終行
+    moved.copyTo(sheet.getRange(last, 1, 1, lastColumn));
+    moved.clearContent();
+  } else if (last >= maxRows) {
+    sheet.insertRowAfter(last);
+  }
   if (last > 1) {
-    const formulas = sheet.getRange(last, 1, 1, lastColumn).getFormulasR1C1()[0];
+    const formulas = sheet.getRange(row - 1, 1, 1, lastColumn).getFormulasR1C1()[0];
     formulas.forEach((formula, i) => { if (formula) sheet.getRange(row, i + 1).setFormulaR1C1(formula); });
   }
 
-  const toDate = s => { const [y, m, d] = s.split('-').map(Number); return new Date(y, m - 1, d); };
+  // 入力規則(プルダウン)の選択肢。スプレッドシートは規則違反を setValue の時点では投げず、
+  // 後でまとめて反映するときに投げる(try で拾えない)ので、書く前に確かめる。選択肢がなければ null
+  const choices = cell => {
+    const rule = cell.getDataValidation();
+    if (!rule || rule.getAllowInvalid()) return null;
+    const type = rule.getCriteriaType();
+    const [arg] = rule.getCriteriaValues();
+    const C = SpreadsheetApp.DataValidationCriteria;
+    if (type === C.VALUE_IN_LIST) return arg.map(String);
+    if (type === C.VALUE_IN_RANGE) return arg.getValues().flat().map(String).filter(Boolean);
+    return null;
+  };
+  const tz = sheet.getParent().getSpreadsheetTimeZone();
   const leftover = [];
-  CASE_COLUMNS.forEach(([name, pick]) => {
-    const text = String(pick(data) || '').trim();
+  // 選択肢の中から入力に合うものを探す。完全一致 → 株式会社などの違いを無視して一致 → 入力を含む選択肢が1つだけ
+  // (例:支店「札幌北」→「LH札幌北」)。見つからなければ undefined
+  const pick = (options, text) => {
+    if (options.includes(text)) return text;
+    const loose = looseName(text);
+    const same = options.find(option => looseName(option) === loose);
+    if (same) return same;
+    const containing = options.filter(option => looseName(option).includes(loose));
+    return containing.length === 1 ? containing[0] : undefined;
+  };
+  // entries の4つ目に { blankIfNoChoice: true } があれば、選択肢に合わないとき備考へ回さず空欄にする
+  entries.forEach(([names, value, format, { blankIfNoChoice = false } = {}]) => {
+    const isDate = Boolean(value && value.day);
+    const text = isDate ? value.day.replace(/-/g, '/') : String(value || '').trim();
     if (!text) return;
-    const col = colOf(name);
-    if (!col) { leftover.push(name + '：' + text); return; }
-    const value = CASE_DATE_COLUMNS.includes(name) ? toDate(text) : safeCell(text);
-    try { sheet.getRange(row, col).setValue(value); } catch (error) { leftover.push(name + '：' + text); }
+    const col = colOf([].concat(names).find(name => colOf(name)) || '');
+    if (!col) { leftover.push([].concat(names)[0] + '：' + text); return; }
+    try {
+      const cell = sheet.getRange(row, col);
+      const allowed = isDate ? null : choices(cell);
+      const choice = allowed && pick(allowed, text);
+      if (allowed && !choice) { if (!blankIfNoChoice) leftover.push([].concat(names)[0] + '：' + text); return; }
+      if (format) cell.setNumberFormat(format);
+      cell.setValue(isDate ? Utilities.parseDate(value.day, tz, 'yyyy-MM-dd') : safeCell(choice || text));
+    } catch (error) { leftover.push([].concat(names)[0] + '：' + text); }
   });
-  const memo = [
-    '[フォーム受付 ' + Utilities.formatDate(new Date(), 'Asia/Tokyo', 'yyyy/MM/dd') + '] 担当：' + data.contact + '（' + data.email + '）',
-    '図面：' + folderUrl,
-    ...(data.warnings || []).map(warning => '【要注意】' + warning),
-    ...leftover,
-    data.note || '',
-  ].filter(Boolean).join('\n');
-  sheet.getRange(row, colOf('備考')).setValue(safeCell(memo));
-  return 'row ' + row;
+  sheet.getRange(row, colOf('備考')).setValue(safeCell([...memo, ...leftover, note || ''].filter(Boolean).join('\n')));
+  return row;
+}
+
+// 備考は既存の行と同じく短くする。連絡先・住所・予定日・図面のリンクは、受付一覧と通知メールに残す
+const warningLines = data => (data.warnings || []).map(w => '【要注意】' + w);
+// 希望納期は設計用・顧客管理にだけ書く(例:希望納期：26/11/20（翌営業日（+3万円）））
+const deadlineLine = data => !data.deadline ? '' : '希望納期：' + data.deadline.slice(2).replace(/-/g, '/') +
+  (data.rush && data.rush !== '希望しない' ? '（' + data.rush + '）' : '');
+
+function appendCaseRow(props, data, folderUrl) {
+  const sheet = openCaseSheet(props);
+  if (!sheet) return 'skipped';
+  const entries = CASE_COLUMNS.map(([name, pick]) => [name, CASE_DATE_COLUMNS.includes(name) ? day(pick(data)) : pick(data),
+    '', { blankIfNoChoice: name === '顧客支店名' }]);
+  return 'row ' + appendByHeader(sheet, entries, warningLines(data), data.note);
+}
+
+// 作図担当・依頼者2・CAD依頼日・設計者・図面納品日・設計料・特許料・ステータスは社内で入力するので空欄のまま
+function appendDesignRow(props, data, folderUrl) {
+  const id = idProperty(props, 'DESIGN_SHEET_ID');
+  if (!id) return 'skipped';
+  const name = designTabName(data.company);
+  const sheet = SpreadsheetApp.openById(id).getSheetByName(name);
+  if (!sheet) throw new Error('Design tab not found: ' + name);
+  const entries = [
+    ...(name === 'その他' ? [['会社名', data.company]] : []),
+    [['支店名', '支店'], data.branch, '', { blankIfNoChoice: true }],
+    ['顧客名', data.projectName],
+    ['依頼者', data.contact],
+    ['PDF依頼日', day(Utilities.formatDate(new Date(), 'Asia/Tokyo', 'yyyy-MM-dd')), 'yy/mm/dd'],
+    ['引渡日', day(data.finish ? data.finish.slice(0, 8) + '01' : ''), 'yy/mm'], // 完工予定日の年月だけ
+    ['案件番号', data.caseNumber],
+    ['床下暖房種別', data.heating], // ロゴスホームにだけある列。ほかのタブでは備考に入る
+  ];
+  return name + ' row ' + appendByHeader(sheet, entries, [deadlineLine(data), ...warningLines(data)], data.note,
+    { insideLastRow: true, firstHeader: '顧客名' });
 }
 
 function prepareDriveUploads(props, data) {
@@ -186,7 +306,7 @@ function saveUploadReceipt(props, data) {
   const folderUrl = 'https://drive.google.com/drive/folders/' + data.folderId;
   const lock = LockService.getScriptLock();
   lock.waitLock(25000);
-  let spreadsheetUrl, caseResult;
+  let spreadsheetUrl, caseResult, designResult;
   try {
     const sheet = SpreadsheetApp.openById(idProperty(props, 'SHEET_ID')).getSheets()[0];
     const lastRow = sheet.getLastRow();
@@ -194,17 +314,30 @@ function saveUploadReceipt(props, data) {
     if (lastRow > 1 && sheet.getRange(2, 8, lastRow - 1, 1).createTextFinder(joinedLinks).matchEntireCell(true).findNext()) {
       return { ok: true };
     }
+    // 案件番号は、案件管理表と設計用・顧客管理の全タブを見て決める。読めないシートがあっても、読めた分で決める
+    const numbered = [];
+    try { const caseSheet = openCaseSheet(props); if (caseSheet) numbered.push(caseSheet); } catch (error) { console.error('Could not read case sheet'); }
+    try { numbered.push(...openDesignTabs(props)); } catch (error) { console.error('Could not read design sheet'); }
+    data.caseNumber = nextCaseNumber(numbered);
     const attachmentHeaders = sheet.getRange('G1:H1');
     if (attachmentHeaders.getValues()[0].join('|') === '図面PDF名|PDFリンク') {
       attachmentHeaders.setValues([['添付ファイル名', '添付ファイルリンク']]);
     }
-    sheet.appendRow([new Date(), safe(data.company), safe(data.contact), safe(data.email), safe(data.start), safe(data.finish),
+    if (sheet.getLastRow() === 0) {
+      sheet.appendRow(['受付日時', '会社名', '担当者', 'メールアドレス', '着工予定日', '完工予定日', '添付ファイル名', '添付ファイルリンク',
+        '保存フォルダ', '支店名', '案件名', '案件住所', '床下暖房種別', '備考', '要注意', '図面の希望納期', '納期の短縮', '案件番号']);
+    }
+    // 受付日時は日本時間の文字列で書く(Date のまま渡すと、スクリプトのタイムゾーンの時刻で入る)
+    sheet.appendRow([Utilities.formatDate(new Date(), 'Asia/Tokyo', 'yyyy/MM/dd HH:mm:ss'), safe(data.company), safe(data.contact), safe(data.email), safe(data.start), safe(data.finish),
       safe(data.files.map(file => file.name).join('\n')), joinedLinks, folderUrl,
       safe(data.branch), safe(data.projectName), safe(data.projectAddress), safe(data.heating), safe(data.note),
-      safe(data.warnings.join('\n'))]);
+      safe(data.warnings.join('\n')), safe(data.deadline), safe(data.rush), data.caseNumber]);
     if (sheet.getRange('J1').getValue() === '') {
       sheet.getRange('J1:N1').setValues([['支店名', '案件名', '案件住所', '床下暖房種別', '備考']]);
     }
+    if (sheet.getRange('P1').getValue() === '') sheet.getRange('P1:Q1').setValues([['図面の希望納期', '納期の短縮']]);
+    if (sheet.getRange('R1').getValue() === '') sheet.getRange('R1').setValue('案件番号');
+    if (sheet.getRange('F1').getValue() === '工事完了予定日') sheet.getRange('F1').setValue('完工予定日');
     if (sheet.getRange('O1').getValue() === '') sheet.getRange('O1').setValue('要注意');
     if (fileLinks.length > 1) {
       try {
@@ -220,13 +353,19 @@ function saveUploadReceipt(props, data) {
       console.error('Could not append case row: ' + error.message);
       caseResult = 'failed';
     }
+    try {
+      designResult = appendDesignRow(props, data, folderUrl);
+    } catch (error) {
+      console.error('Could not append design row: ' + error.message);
+      designResult = 'failed';
+    }
     SpreadsheetApp.flush();
     spreadsheetUrl = sheet.getParent().getUrl();
   } finally {
     lock.releaseLock();
   }
   return { ok: true, caseRow: caseResult,
-    notification: notifyReceipt(data, data.files.map(file => file.name), folderUrl, spreadsheetUrl, caseResult) };
+    notification: notifyReceipt(data, data.files.map(file => file.name), folderUrl, spreadsheetUrl, caseResult, designResult) };
 }
 
 function setReceiptFileLinks(cell, text) {
@@ -269,17 +408,19 @@ function verifyUploadAccess() {
   });
 }
 
-function notifyReceipt(data, filenames, folderUrl, spreadsheetUrl, caseResult) {
+function notifyReceipt(data, filenames, folderUrl, spreadsheetUrl, caseResult, designResult) {
   const displayName = '株式会社カイトー商会 申込受付';
   const recipient = PropertiesService.getScriptProperties().getProperty('NOTIFY_EMAIL');
   if (!recipient) return;
   const oneLine = value => String(value || '').replace(/[\r\n\x00-\x1f\x7f]+/g, ' ').trim();
   const company = oneLine(data.company);
   const warnings = data.warnings || [];
-  const subject = (warnings.length ? '【要注意】' : '') + '【' + displayName + '】' + company + 'からの依頼が届いてます！';
+  const rush = data.rush && data.rush !== '希望しない' ? '【納期短縮】' : '';
+  const subject = (warnings.length ? '【要注意】' : '') + rush + '【' + displayName + '】' + company + 'からの依頼が届いてます！';
   const body = [
     company + 'から図面の提出がありました。',
     '',
+    '案件番号　' + oneLine(data.caseNumber),
     '支店名　' + (oneLine(data.branch) || '-'),
     '担当者　' + oneLine(data.contact),
     'メールアドレス　' + oneLine(data.email),
@@ -287,6 +428,9 @@ function notifyReceipt(data, filenames, folderUrl, spreadsheetUrl, caseResult) {
     '案件住所　' + oneLine(data.projectAddress),
     '床下暖房種別　' + (oneLine(data.heating) || '未定'),
     '着工予定日　' + (oneLine(data.start) || '未定'),
+    '完工予定日　' + (oneLine(data.finish) || '未定'),
+    '図面の希望納期　' + (oneLine(data.deadline) || '-'),
+    '納期の短縮　' + (oneLine(data.rush) || '希望しない'),
     '',
     '添付ファイル（' + filenames.length + '件）',
     ...filenames.map(name => '・' + oneLine(name)),
@@ -299,7 +443,8 @@ function notifyReceipt(data, filenames, folderUrl, spreadsheetUrl, caseResult) {
     '受付一覧',
     spreadsheetUrl,
     '',
-    '案件管理表への登録　' + (caseResult === 'failed' ? '失敗しました。手入力してください。' : caseResult === 'skipped' ? '未設定' : caseResult),
+    ...[['案件管理表', caseResult], ['設計用・顧客管理', designResult]].map(([label, result]) =>
+      label + 'への登録　' + (result === 'failed' ? '失敗しました。手入力してください。' : result === 'skipped' ? '未設定' : result)),
     ...(data.note ? ['', '備考', String(data.note)] : []),
   ].join('\n');
   try {

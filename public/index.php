@@ -50,7 +50,7 @@ page_start('お問い合わせ | BAQOOL サポート');
       <h3>ご提出者</h3>
       <div class="grid">
         <div class="field"><label for="company">会社名<span class="req">必須</span></label><input id="company" name="company" autocomplete="organization" maxlength="100" required value="<?= $v('company') ?>"></div>
-        <div class="field"><label for="branch">支店名</label><input id="branch" name="branch" maxlength="100" value="<?= $v('branch') ?>"></div>
+        <div class="field"><label for="branch">支店名<span class="req">必須</span></label><input id="branch" name="branch" maxlength="100" required aria-describedby="branch-hint" value="<?= $v('branch') ?>"><p class="hint" id="branch-hint">施工を担当される支店名をご入力ください。</p></div>
       </div>
       <div class="field"><label for="contact">ご担当者名<span class="req">必須</span></label><input id="contact" name="contact" autocomplete="name" maxlength="100" required value="<?= $v('contact') ?>"></div>
       <div class="field"><label for="email">メールアドレス<span class="req">必須</span></label><input id="email" name="email" type="email" inputmode="email" autocomplete="email" maxlength="254" required pattern="[\x21-\x7E]+@[\x21-\x7E]+\.[\x21-\x7E]+" title="半角英数字でご入力ください" value="<?= $v('email') ?>"></div>
@@ -58,16 +58,40 @@ page_start('お問い合わせ | BAQOOL サポート');
 
     <div class="section">
       <h3>案件情報</h3>
-      <div class="field"><label for="projectName">案件名<span class="req">必須</span></label><input id="projectName" name="projectName" maxlength="200" required aria-describedby="projectName-hint" value="<?= $v('projectName') ?>"><p class="hint" id="projectName-hint">例：〇〇様邸 新築工事</p></div>
-      <div class="field"><label for="projectAddress">案件住所<span class="req">必須</span></label><input id="projectAddress" name="projectAddress" maxlength="200" required value="<?= $v('projectAddress') ?>"></div>
+      <fieldset class="field">
+        <legend class="label">案件名（施主様のお名前）<span class="req">必須</span></legend>
+        <div class="grid">
+          <div><label class="sub" for="projectSei">姓</label><input id="projectSei" name="projectSei" maxlength="50" required placeholder="例：山田" value="<?= $v('projectSei') ?>"></div>
+          <div><label class="sub" for="projectMei">名</label><input id="projectMei" name="projectMei" maxlength="50" required placeholder="例：太郎" value="<?= $v('projectMei') ?>"></div>
+        </div>
+      </fieldset>
+      <fieldset class="field">
+        <legend class="label">案件住所<span class="req">必須</span></legend>
+        <label class="sub" for="pref">都道府県</label>
+        <select id="pref" name="pref" required autocomplete="address-level1">
+          <option value="">選択してください</option>
+          <?php foreach (PREFECTURES as $pref): ?><option<?= ($values['pref'] ?? '') === $pref ? ' selected' : '' ?>><?= h($pref) ?></option><?php endforeach; ?>
+        </select>
+        <label class="sub" for="city">市区町村</label>
+        <input id="city" name="city" maxlength="100" required autocomplete="address-level2" placeholder="例：横浜市中区" value="<?= $v('city') ?>">
+        <label class="sub" for="street">丁目番地・建物名・部屋番号</label>
+        <input id="street" name="street" maxlength="200" required autocomplete="address-line1" placeholder="例：本町1-2-3 〇〇マンション101" value="<?= $v('street') ?>">
+      </fieldset>
+      <div class="field"><label for="heating">床下暖房種別<span class="req">必須</span></label><select id="heating" name="heating" required>
+        <option value="">選択してください</option>
+        <?php foreach (['放熱器' => '放熱器', 'AC' => 'AC', 'ﾌｧﾝｺﾝﾍﾞｸﾀｰ' => 'ファンコンベクター', '未定' => '未定'] as $value => $label): ?>
+          <option value="<?= h($value) ?>"<?= ($values['heating'] ?? '') === $value ? ' selected' : '' ?>><?= h($label) ?></option>
+        <?php endforeach; ?>
+      </select></div>
       <div class="grid">
-        <div class="field"><label for="heating">床下暖房種別</label><select id="heating" name="heating">
-          <option value="">未定</option>
-          <?php foreach (['放熱器' => '放熱器', 'AC' => 'AC', 'ﾌｧﾝｺﾝﾍﾞｸﾀｰ' => 'ファンコンベクター'] as $value => $label): ?>
-            <option value="<?= h($value) ?>"<?= ($values['heating'] ?? '') === $value ? ' selected' : '' ?>><?= h($label) ?></option>
-          <?php endforeach; ?>
-        </select></div>
-        <div class="field"><label for="start">着工予定日</label><input id="start" name="start" type="date" aria-describedby="start-hint" value="<?= $v('start') ?>"><p class="hint" id="start-hint">予定日が未定の場合は、空欄のままご送信いただけます。</p></div>
+        <div class="field"><label for="start">着工予定日<span class="req">必須</span></label><input id="start" name="start" type="date" required aria-describedby="start-hint" value="<?= $v('start') ?>"><p class="hint" id="start-hint">おおよその日付で構いません。</p></div>
+        <div class="field"><label for="finish">完工予定日<span class="req">必須</span></label><input id="finish" name="finish" type="date" required aria-describedby="finish-hint" value="<?= $v('finish') ?>"><p class="hint" id="finish-hint">おおよその日付で構いません。</p></div>
+      </div>
+      <div class="grid">
+        <div class="field"><label for="deadline">図面の希望納期<span class="req">必須</span></label><input id="deadline" name="deadline" type="date" required aria-describedby="deadline-hint" value="<?= $v('deadline') ?>"><p class="hint" id="deadline-hint">図面の作成には、通常4営業日ほどかかります。</p></div>
+        <div class="field"><label for="rush">納期の短縮<span class="req">必須</span></label><select id="rush" name="rush" required aria-describedby="rush-hint">
+          <?php foreach (RUSH_OPTIONS as $rush): ?><option<?= ($values['rush'] ?? '') === $rush ? ' selected' : '' ?>><?= h($rush) ?></option><?php endforeach; ?>
+        </select><p class="hint" id="rush-hint">納期の短縮には追加料金がかかります。</p></div>
       </div>
       <div class="field"><label for="note">備考</label><textarea id="note" name="note" maxlength="1000"><?= $v('note') ?></textarea></div>
     </div>
@@ -95,6 +119,15 @@ page_start('お問い合わせ | BAQOOL サポート');
       <button class="button" type="submit">内容を送信する</button>
       <p class="hint">ファイルの大きさによっては、送信に時間がかかる場合がございます。<br>画面が切り替わるまで、送信ボタンは一度だけ押してお待ちください。</p>
     </div>
+    <dialog class="confirm" id="confirm" aria-labelledby="confirm-title">
+      <h3 id="confirm-title">入力内容のご確認</h3>
+      <p class="hint">以下の内容で送信します。よろしければ「この内容で送信する」を押してください。</p>
+      <dl id="confirm-list"></dl>
+      <div class="confirm-actions">
+        <button class="button secondary" type="button" id="confirm-back">修正する</button>
+        <button class="button" type="button" id="confirm-send">この内容で送信する</button>
+      </div>
+    </dialog>
   </form>
 </main>
 <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
@@ -170,6 +203,46 @@ page_start('お問い合わせ | BAQOOL サポート');
       error.textContent = '図面ファイルを追加してください。';
       picker.focus();
     }
+  });
+})();
+
+// 送信前に、入力内容を確認する画面を出す。JavaScript が動かないブラウザでは、そのまま送信される。
+(() => {
+  const dialog = document.getElementById('confirm');
+  if (!dialog || typeof dialog.showModal !== 'function') return;
+  const form = dialog.closest('form');
+  const list = document.getElementById('confirm-list');
+  const send = document.getElementById('confirm-send');
+  const val = name => (form.elements[name]?.value || '').trim();
+  const date = name => val(name).replaceAll('-', '/');
+  const heating = () => form.elements.heating.selectedOptions[0]?.textContent || '';
+  let confirmed = false;
+
+  form.addEventListener('submit', event => {
+    if (event.defaultPrevented || confirmed) return;
+    event.preventDefault();
+    const rows = [
+      ['会社名', val('company')], ['支店名', val('branch')], ['ご担当者名', val('contact')], ['メールアドレス', val('email')],
+      ['案件名', val('projectSei') + '　' + val('projectMei')], ['案件住所', val('pref') + val('city') + val('street')],
+      ['床下暖房種別', heating()], ['着工予定日', date('start')], ['完工予定日', date('finish')],
+      ['図面の希望納期', date('deadline')], ['納期の短縮', val('rush')], ['備考', val('note') || 'なし'],
+      ['図面ファイル', [...document.getElementById('drawing').files].map(f => f.name).join('\n')],
+    ];
+    list.replaceChildren(...rows.flatMap(([label, value]) => {
+      const dt = document.createElement('dt');
+      dt.textContent = label;
+      const dd = document.createElement('dd');
+      dd.textContent = value;
+      return [dt, dd];
+    }));
+    dialog.showModal();
+  });
+  document.getElementById('confirm-back').addEventListener('click', () => dialog.close());
+  send.addEventListener('click', () => {
+    confirmed = true;
+    send.disabled = true; // 二度押しを防ぐ
+    send.textContent = '送信しています…';
+    form.requestSubmit();
   });
 })();
 </script>

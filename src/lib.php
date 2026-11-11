@@ -8,6 +8,11 @@ const MAX_TOTAL_SIZE = 80 * 1024 * 1024; // 1回の送信で添付できる合�
 const MAX_FILES = 10;                    // PDF と JWW を合わせた個数
 const FILE_SIGNATURES = ['pdf' => '%PDF-', 'jww' => 'JwwData.']; // ファイル先頭の決まった文字列
 const HEATING_TYPES = ['放熱器', 'AC', 'ﾌｧﾝｺﾝﾍﾞｸﾀｰ']; // 案件基本情報「床下暖房種別」のプルダウンと同じ表記
+const RUSH_OPTIONS = ['希望しない', '翌営業日（+3万円）', '2営業日後（+2万円）', '3営業日後（+1万円）'];
+const PREFECTURES = ['北海道', '青森県', '岩手県', '宮城県', '秋田県', '山形県', '福島県', '茨城県', '栃木県', '群馬県', '埼玉県',
+  '千葉県', '東京都', '神奈川県', '新潟県', '富山県', '石川県', '福井県', '山梨県', '長野県', '岐阜県', '静岡県', '愛知県', '三重県',
+  '滋賀県', '京都府', '大阪府', '兵庫県', '奈良県', '和歌山県', '鳥取県', '島根県', '岡山県', '広島県', '山口県', '徳島県', '香川県',
+  '愛媛県', '高知県', '福岡県', '佐賀県', '長崎県', '熊本県', '大分県', '宮崎県', '鹿児島県', '沖縄県'];
 const FORM_TOKEN_TTL = 2 * 3600;
 const DRIVE_UPLOAD_PREFIX = 'https://www.googleapis.com/upload/drive/v3/files';
 
@@ -180,8 +185,9 @@ function format_mb(int $bytes): string { return rtrim(rtrim(number_format($bytes
 
 /** @return array{0: array, 1: string[]} 整えた入力値とエラーメッセージ */
 function validate_fields(array $post): array {
-  $limits = ['company' => 100, 'branch' => 100, 'contact' => 100, 'email' => 254, 'projectName' => 200,
-    'projectAddress' => 200, 'heating' => 20, 'start' => 10, 'note' => 1000];
+  $limits = ['company' => 100, 'branch' => 100, 'contact' => 100, 'email' => 254, 'projectSei' => 50, 'projectMei' => 50,
+    'pref' => 10, 'city' => 100, 'street' => 200, 'heating' => 20, 'start' => 10, 'finish' => 10, 'deadline' => 10,
+    'rush' => 30, 'note' => 1000];
   $fields = [];
   $errors = [];
   foreach ($limits as $name => $max) {
@@ -189,8 +195,10 @@ function validate_fields(array $post): array {
     if (mb_strlen($value) > $max) { $errors[] = '入力が長すぎる項目があります。'; $value = mb_substr($value, 0, $max); }
     $fields[$name] = $value;
   }
-  $required = ['company' => '会社名', 'contact' => 'ご担当者名', 'email' => 'メールアドレス', 'projectName' => '案件名',
-    'projectAddress' => '案件住所'];
+  $required = ['company' => '会社名', 'branch' => '支店名', 'contact' => 'ご担当者名', 'email' => 'メールアドレス',
+    'projectSei' => '案件名の姓', 'projectMei' => '案件名の名', 'pref' => '都道府県', 'city' => '市区町村',
+    'street' => '丁目番地・建物名・部屋番号', 'heating' => '床下暖房種別', 'start' => '着工予定日', 'finish' => '完工予定日',
+    'deadline' => '図面の希望納期', 'rush' => '納期の短縮'];
   foreach ($required as $name => $label) {
     if ($fields[$name] === '') $errors[] = $label . 'をご入力ください。';
   }
@@ -198,8 +206,19 @@ function validate_fields(array $post): array {
       preg_match('/[^\x21-\x7e]/', $fields['email']))) { // 半角・全角スペースや全角文字を含むものは受け付けない
     $errors[] = 'メールアドレスは半角英数字でご入力ください。';
   }
-  if ($fields['heating'] !== '' && !in_array($fields['heating'], HEATING_TYPES, true)) $errors[] = '床下暖房種別をご確認ください。';
-  if ($fields['start'] !== '' && !preg_match('/^\d{4}-\d{2}-\d{2}$/D', $fields['start'])) $errors[] = '着工予定日をご確認ください。';
+  if ($fields['heating'] !== '' && $fields['heating'] !== '未定' && !in_array($fields['heating'], HEATING_TYPES, true)) $errors[] = '床下暖房種別をご確認ください。';
+  if ($fields['pref'] !== '' && !in_array($fields['pref'], PREFECTURES, true)) $errors[] = '都道府県をご確認ください。';
+  if ($fields['rush'] !== '' && !in_array($fields['rush'], RUSH_OPTIONS, true)) $errors[] = '納期の短縮をご確認ください。';
+  foreach (['start' => '着工予定日', 'finish' => '完工予定日', 'deadline' => '図面の希望納期'] as $name => $label) {
+    $d = explode('-', $fields[$name]);
+    if ($fields[$name] !== '' && !(preg_match('/^\d{4}-\d{2}-\d{2}$/D', $fields[$name]) && checkdate((int) $d[1], (int) $d[2], (int) $d[0]))) {
+      $errors[] = $label . 'をご確認ください。';
+    }
+  }
+  // 案件管理表には「案件名」「案件住所」の1列ずつで書く
+  $fields['projectName'] = $fields['projectSei'] . '　' . $fields['projectMei']; // 既存の行と同じく全角スペース
+  $fields['projectAddress'] = $fields['pref'] . $fields['city'] . $fields['street'];
+  if ($fields['heating'] === '未定') $fields['heating'] = ''; // 案件管理表では空欄が未定
   return [$fields, array_values(array_unique($errors))];
 }
 
@@ -261,6 +280,11 @@ function http(string $method, string $url, array $headers = [], $body = null, in
   } elseif ($body !== null) {
     $options[CURLOPT_POSTFIELDS] = $body;
   }
+  if ($method === 'POST') {
+    // Apps Script は POST に 302 で応え、応答を GET で取りに行かせる。CUSTOMREQUEST だと POST のまま追いかけて 405 になる
+    unset($options[CURLOPT_CUSTOMREQUEST]);
+    $options[CURLOPT_POST] = true;
+  }
   curl_setopt_array($ch, $options);
   $result = curl_exec($ch);
   $status = (int) curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
@@ -284,7 +308,9 @@ function script_request(array $data, int $timeout = 60): array {
   [$status, $body] = http('POST', $env['APPS_SCRIPT_URL'], ['Content-Type: text/plain;charset=UTF-8'],
     json_encode($data + ['secret' => $env['SHARED_SECRET']], JSON_UNESCAPED_UNICODE), $timeout);
   $result = json_decode($body, true);
-  if ($status !== 200 || !is_array($result) || empty($result['ok'])) throw new RuntimeException('Apps Script failed');
+  if ($status !== 200 || !is_array($result) || empty($result['ok'])) {
+    throw new RuntimeException('Apps Script failed: ' . ($data['action'] ?? '') . ' ' . $status . ' ' . (is_array($result) ? (string) ($result['error'] ?? '') : ''));
+  }
   return $result;
 }
 

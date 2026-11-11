@@ -64,6 +64,10 @@ main{padding-bottom:96px}
 .grid{display:grid;grid-template-columns:1fr 1fr;gap:0 20px}
 .field{margin-bottom:22px}
 label,.label{display:block;font-weight:500;font-size:14px;margin-bottom:8px}
+fieldset{border:0;padding:0;margin:0 0 22px;min-width:0}
+legend{padding:0}
+label.sub{font-weight:400;color:var(--sub);font-size:13px;margin:12px 0 6px}
+legend + label.sub,.grid label.sub{margin-top:0}
 .req{display:inline-block;margin-left:8px;padding:0 8px;border-radius:999px;background:rgba(0,200,200,.16);font-size:11px;font-weight:700;line-height:20px;vertical-align:1px}
 input,select,textarea{font:inherit;color:inherit;width:100%;min-height:48px;padding:12px 14px;border:1px solid var(--line);border-radius:12px;background:#fff}
 textarea{min-height:120px;resize:vertical;line-height:1.6}
@@ -98,6 +102,17 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--accent);
 .file-remove:focus-visible{outline:3px solid var(--accent);outline-offset:1px}
 .file-error{margin:8px 0 0;color:var(--error);font-size:13px;white-space:pre-line}
 .file-error:empty{display:none}
+.confirm{width:min(640px,calc(100% - 32px));max-height:calc(100% - 48px);border:0;border-radius:18px;padding:32px;color:var(--text)}
+.confirm::backdrop{background:rgba(0,0,0,.45)}
+.confirm h3{border:0;padding:0;margin:0 0 4px}
+.confirm dl{display:grid;grid-template-columns:9em 1fr;margin:20px 0 0;font-size:14px}
+.confirm dt,.confirm dd{margin:0;padding:10px 0;border-top:1px solid var(--line)}
+.confirm dt{color:var(--sub)}
+.confirm dd{white-space:pre-line;overflow-wrap:anywhere}
+.confirm-actions{display:flex;gap:12px;justify-content:center;margin-top:24px}
+.button.secondary{background:var(--soft)}
+.button:disabled{opacity:.6;cursor:default}
+@media(max-width:734px){.confirm{padding:24px 20px}.confirm dl{grid-template-columns:1fr}.confirm dd{border-top:0;padding-top:0}.confirm-actions{flex-direction:column-reverse}}
 .cf-turnstile{display:flex;justify-content:center;min-height:65px;margin-bottom:20px}
 .link-button{display:inline-block;text-decoration:none;font-weight:700;color:var(--text);background:var(--accent);border-radius:999px;padding:12px 32px}
 

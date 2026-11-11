@@ -54,8 +54,9 @@ function check($name, $ok, $detail = '') { global $failed; echo ($ok ? 'ok   ' :
 $pdf = '%PDF-1.7 test drawing';
 $jww = "JwwData.\xc8\x02\x00\x00 test";
 $fields = ['company' => 'テスト工務店', 'branch' => '大阪支店', 'contact' => '山田', 'email' => 'test@example.com',
-  'projectName' => '山田様邸 新築工事', 'projectAddress' => '大阪府大阪市1-2-3', 'heating' => 'ﾌｧﾝｺﾝﾍﾞｸﾀｰ',
-  'start' => '2026-12-01', 'note' => '=SUM(A1)', 'website' => '', 'cf-turnstile-response' => 'XXXX.DUMMY.TOKEN'];
+  'projectSei' => '山田', 'projectMei' => '太郎', 'pref' => '大阪府', 'city' => '大阪市', 'street' => '1-2-3',
+  'heating' => 'ﾌｧﾝｺﾝﾍﾞｸﾀｰ', 'start' => '2026-12-01', 'finish' => '2026-12-20', 'deadline' => '2026-11-20',
+  'rush' => '2営業日後（+2万円）', 'note' => '=SUM(A1)', 'website' => '', 'cf-turnstile-response' => 'XXXX.DUMMY.TOKEN'];
 $form = function (array $override = [], ?array $files = null) use ($fields, $pdf, $jww) {
   $files = $files ?? ['drawing[0]' => file_of('plan.pdf', $pdf), 'drawing[1]' => file_of('plan.jww', $jww)];
   return $override + ['token' => token()] + $fields + $files;
@@ -84,6 +85,7 @@ try {
   check('valid submission redirects to complete page', $s === 303 && ($h['location'] ?? '') === 'complete.php', "status $s " . strip_tags(substr($body, 0, 300)));
   $done = json_decode((string) @file_get_contents("$tmp/kaito-mock-finish.json"), true);
   check('finish sends all case fields', ($done['projectAddress'] ?? '') === '大阪府大阪市1-2-3' && ($done['heating'] ?? '') === 'ﾌｧﾝｺﾝﾍﾞｸﾀｰ' &&
+    ($done['projectName'] ?? '') === '山田　太郎' && ($done['finish'] ?? '') === '2026-12-20' && ($done['rush'] ?? '') === '2営業日後（+2万円）' &&
     ($done['folderId'] ?? '') === 'FOLDER' && count($done['files'] ?? []) === 2 && !isset($done['website']) && !isset($done['token']));
   check('files reach Drive unchanged', @file_get_contents("$tmp/kaito-upload-ID0.bin") === $pdf && @file_get_contents("$tmp/kaito-upload-ID1.bin") === $jww);
 
@@ -94,8 +96,16 @@ try {
   check('honeypot blocks bots', $s === 422);
   [$s, $body] = request('index.php', $form(['token' => '1700000000.' . str_repeat('a', 24) . '.' . str_repeat('b', 64)]));
   check('forged token is rejected', $s === 422 && strpos($body, '有効期限') !== false);
-  [$s, $body] = request('index.php', $form(['projectName' => '']));
-  check('missing 案件名 is rejected', $s === 422 && strpos($body, '案件名をご入力ください') !== false);
+  [$s, $body] = request('index.php', $form(['projectMei' => '']));
+  check('missing 案件名の名 is rejected', $s === 422 && strpos($body, '案件名の名をご入力ください') !== false);
+  foreach (['branch' => '支店名', 'finish' => '完工予定日', 'deadline' => '図面の希望納期', 'heating' => '床下暖房種別'] as $name => $label) {
+    [$s, $body] = request('index.php', $form([$name => '']));
+    check("missing $label is rejected", $s === 422 && strpos($body, $label . 'をご入力ください') !== false);
+  }
+  [$s, $body] = request('index.php', $form(['pref' => '東京']));
+  check('unknown 都道府県 is rejected', $s === 422 && strpos($body, '都道府県をご確認ください') !== false);
+  [$s, $body] = request('index.php', $form(['deadline' => '2026-02-30']));
+  check('impossible date is rejected', $s === 422 && strpos($body, '図面の希望納期をご確認ください') !== false);
   check('entered values are kept after an error', strpos($body, 'value="テスト工務店"') !== false && strpos($body, '>=SUM(A1)</textarea>') !== false);
   foreach (['a b@example.com', "a\u{3000}b@example.com", 'ａｂｃ＠ｅｘａｍｐｌｅ．ｃｏｍ', 'テスト@example.com'] as $bad) {
     [$s, $body] = request('index.php', $form(['email' => $bad]));

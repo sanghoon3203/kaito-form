@@ -3,6 +3,14 @@
 // PHP 7.4+ と curl・mbstring・openssl 拡張が必要。設定は .env(public の一つ上)から読む。.env.example を参照。
 declare(strict_types=1);
 
+// WordPress の中でも動くように、関数名がほかのプラグインとぶつからない名前空間に入れる
+namespace KaitoForm;
+
+use DateTimeImmutable;
+use DateTimeZone;
+use RuntimeException;
+use Throwable;
+
 const MAX_FILE_SIZE = 8 * 1024 * 1024;   // 1ファイルの上限
 const MAX_TOTAL_SIZE = 80 * 1024 * 1024; // 1回の送信で添付できる合計
 const MAX_FILES = 10;                    // PDF と JWW を合わせた個数
@@ -11,7 +19,7 @@ const HEATING_TYPES = ['放熱器', 'AC', 'ﾌｧﾝｺﾝﾍﾞｸﾀｰ']; // 
 // 納期の短縮の選択肢 => 作図にかかる営業日数(受付日は数えない)。納品は、その次の営業日
 const RUSH_OPTIONS = ['希望しない' => 4, '1営業日（+3万円）' => 1, '2営業日（+2万円）' => 2, '3営業日（+1万円）' => 3];
 const BUSINESS_CLOSE = '17:30'; // 営業時間は平日 8:30〜17:30。これを過ぎた申し込みは翌営業日の受付
-// 土日のほかに休む日(国民の祝日)。年末年始などの休業日や、2028年以降の祝日はここに足す
+// 土日のほかに休む日(国民の祝日)。Google カレンダーから休業日を取れないときに使う予備の一覧(holidays() を参照)
 const HOLIDAYS = ['2026-11-23', '2027-01-01', '2027-01-11', '2027-02-11', '2027-02-23', '2027-03-22', '2027-04-29',
   '2027-05-03', '2027-05-04', '2027-05-05', '2027-07-19', '2027-08-11', '2027-09-20', '2027-09-23', '2027-10-11',
   '2027-11-03', '2027-11-23'];
@@ -25,6 +33,8 @@ const DRIVE_UPLOAD_PREFIX = 'https://www.googleapis.com/upload/drive/v3/files';
 function env(): array {
   static $env = null;
   if ($env !== null) return $env;
+  // WordPress プラグインとして動くときは、管理画面の設定を kaito-form.php がここに入れる
+  if (isset($GLOBALS['kaito_env']) && is_array($GLOBALS['kaito_env'])) return $env = $GLOBALS['kaito_env'];
   $env = [];
   $paths = getenv('KAITO_ENV_FILE') ? [getenv('KAITO_ENV_FILE')] : [dirname(__DIR__) . '/.env'];
   foreach ($paths as $path) {
@@ -68,6 +78,11 @@ function send_security_headers(): void {
 function data_dir(): string {
   $dir = env()['DATA_DIR'] ?? (dirname(__DIR__) . '/data');
   if (!is_dir($dir)) @mkdir($dir, 0700, true);
+  // 公開フォルダの中に置かれた場合(WordPress の uploads など)に、ブラウザから開けないようにする
+  if (is_dir($dir) && !is_file($dir . '/.htaccess')) {
+    @file_put_contents($dir . '/.htaccess', "Require all denied\nDeny from all\n");
+    @file_put_contents($dir . '/index.html', '');
+  }
   return $dir;
 }
 
@@ -195,8 +210,37 @@ function now_tokyo(): DateTimeImmutable {
   return new DateTimeImmutable($test !== '' ? $test : 'now', new DateTimeZone('Asia/Tokyo'));
 }
 
+/**
+ * 休む日(Y-m-d)の一覧。Apps Script 経由で Google カレンダー(日本の祝日と、会社の休業日)から1日1回取り、
+ * データフォルダに覚えておく。取れないときは、前に取れた分と組み込みの HOLIDAYS で続ける。
+ */
+function holidays(): array {
+  static $list = null;
+  if ($list !== null) return $list;
+  $env = env();
+  if (empty($env['APPS_SCRIPT_URL']) || empty($env['SHARED_SECRET'])) return $list = HOLIDAYS;
+  $file = data_dir() . '/holidays.json';
+  $cached = is_file($file) ? json_decode((string) file_get_contents($file), true) : null;
+  if (!is_array($cached) || (int) ($cached['at'] ?? 0) < time() - 86400) {
+    $days = is_array($cached) ? (array) ($cached['days'] ?? []) : [];
+    try {
+      $result = script_request(['action' => 'holidays'], 10);
+      $days = array_values(array_filter((array) ($result['holidays'] ?? []), function ($day) {
+        return is_string($day) && preg_match('/^\d{4}-\d{2}-\d{2}$/D', $day);
+      }));
+      $cached = ['at' => time(), 'days' => $days];
+    } catch (Throwable $e) {
+      // ponytail: 取れなかったことも1時間は覚えておき、画面を開くたびに待たせない
+      error_log('kaito-form: holidays ' . $e->getMessage());
+      $cached = ['at' => time() - 86400 + 3600, 'days' => $days];
+    }
+    @file_put_contents($file, json_encode($cached), LOCK_EX);
+  }
+  return $list = array_values(array_unique(array_merge(HOLIDAYS, (array) ($cached['days'] ?? []))));
+}
+
 function is_business_day(DateTimeImmutable $d): bool {
-  return (int) $d->format('N') < 6 && !in_array($d->format('Y-m-d'), HOLIDAYS, true);
+  return (int) $d->format('N') < 6 && !in_array($d->format('Y-m-d'), holidays(), true);
 }
 
 function add_business_days(DateTimeImmutable $d, int $n): DateTimeImmutable {

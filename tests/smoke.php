@@ -167,23 +167,32 @@ try {
   write_env(['RATE_LIMIT_PER_HOUR=2', 'CLIENT_UPLOAD_MB_PER_HOUR=1', 'GLOBAL_LIMIT_PER_HOUR=1000', 'GLOBAL_UPLOAD_MB_PER_HOUR=1000']);
   require $root . '/src/lib.php';
   $ip = '198.51.100.7';
-  [$err] = reserve_quota($ip, 2 * 1024 * 1024, 'big');
+  [$err] = \KaitoForm\reserve_quota($ip, 2 * 1024 * 1024, 'big');
   check('per-client upload volume cap', $err !== null && strpos($err, '上限') !== false);
-  [$e1] = reserve_quota($ip, 1000, 'a');
-  [$e2] = reserve_quota($ip, 1000, 'b');
+  [$e1] = \KaitoForm\reserve_quota($ip, 1000, 'a');
+  [$e2] = \KaitoForm\reserve_quota($ip, 1000, 'b');
   check('rejected requests do not use up quota', $e1 === null && $e2 === null, "$e1 / $e2");
-  [$e3] = reserve_quota($ip, 1000, 'c');
+  [$e3] = \KaitoForm\reserve_quota($ip, 1000, 'c');
   check('per-client count still applies', $e3 !== null);
 
-  check('IPv6 addresses in one /64 share a limit', client_key('2001:db8:1:2::1') === client_key('2001:db8:1:2:ffff::9') &&
-    client_key('2001:db8:1:2::1') !== client_key('2001:db8:1:3::1'));
-  check('IPv4 and IPv4-mapped IPv6 are counted per address', client_key('::ffff:203.0.113.5') === client_key('203.0.113.5') &&
-    client_key('203.0.113.5') !== client_key('203.0.113.6'));
+  check('IPv6 addresses in one /64 share a limit', \KaitoForm\client_key('2001:db8:1:2::1') === \KaitoForm\client_key('2001:db8:1:2:ffff::9') &&
+    \KaitoForm\client_key('2001:db8:1:2::1') !== \KaitoForm\client_key('2001:db8:1:3::1'));
+  check('IPv4 and IPv4-mapped IPv6 are counted per address', \KaitoForm\client_key('::ffff:203.0.113.5') === \KaitoForm\client_key('203.0.113.5') &&
+    \KaitoForm\client_key('203.0.113.5') !== \KaitoForm\client_key('203.0.113.6'));
+
+  // 休業日は Apps Script(Google カレンダー)から取る。木曜(11/12)が休みなら、1営業日の納品予定日は1日延びる
+  [, $body] = request('index.php');
+  check('delivery dates before the calendar holiday', strpos(html_entity_decode($body), '"1営業日（+3万円）":"2026-11-13"') !== false);
+  file_put_contents("$tmp/kaito-mock-holidays.json", json_encode(['2026-11-12', 'not-a-date']));
+  @unlink("$dataDir/holidays.json");
+  [, $body] = request('index.php');
+  check('a calendar holiday moves the delivery date', strpos(html_entity_decode($body), '"1営業日（+3万円）":"2026-11-16"') !== false);
+  @unlink("$tmp/kaito-mock-holidays.json");
 
   [$s, $body] = request('complete.php');
   check('complete page renders', $s === 200 && strpos($body, '受け付けました') !== false && stripos($body, '<script') === false);
 } finally {
   proc_terminate($app); proc_terminate($mock);
-  array_map('unlink', glob("$dataDir/*") ?: []); @rmdir($dataDir);
+  array_map('unlink', array_merge(glob("$dataDir/*") ?: [], glob("$dataDir/.ht*") ?: [])); @rmdir($dataDir);
 }
 exit($failed ? 1 : 0);

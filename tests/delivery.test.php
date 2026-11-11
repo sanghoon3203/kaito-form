@@ -2,6 +2,8 @@
 // 動作確認: php tests/delivery.test.php
 // 納品予定日の計算(営業日・営業時間・祝日)を確かめる。
 require dirname(__DIR__) . '/src/lib.php';
+use function KaitoForm\delivery_date;
+use function KaitoForm\jp_date;
 $tz = new DateTimeZone('Asia/Tokyo');
 $one = '1営業日（+3万円）'; $two = '2営業日（+2万円）'; $three = '3営業日（+1万円）'; $none = '希望しない';
 $cases = [

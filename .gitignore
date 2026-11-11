@@ -7,3 +7,5 @@ notification-preview.txt
 __pycache__/
 .env
 data/
+OPERATIONS.md
+kaito-form.zip

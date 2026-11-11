@@ -1,6 +1,7 @@
 // Script properties: ROOT_FOLDER_ID, SHEET_ID, SHARED_SECRET, NOTIFY_EMAIL,
 // CASE_SHEET_ID(案件管理表。未設定なら書き込まない), CASE_SHEET_NAME(省略時「案件基本情報」),
-// DESIGN_SHEET_ID(設計用・顧客管理。未設定なら書き込まない).
+// DESIGN_SHEET_ID(設計用・顧客管理。未設定なら書き込まない),
+// HOLIDAY_CALENDAR_IDS(休業日を入れた Google カレンダーの ID。カンマ区切り。日本の祝日は自動で含める).
 function doPost(e) {
   const output = value => ContentService.createTextOutput(JSON.stringify(value)).setMimeType(ContentService.MimeType.JSON);
   let authed = false;
@@ -11,12 +12,43 @@ function doPost(e) {
     authed = true;
     if (data.action === 'prepare') return output(prepareDriveUploads(props, data));
     if (data.action === 'finish') return output(saveUploadReceipt(props, data));
+    if (data.action === 'holidays') return output(listHolidays(props));
     return output({ok:false});
   } catch(error) {
     console.error('Submission failed: ' + (error && error.stack || error));
     // 原因は SHARED_SECRET を知っている呼び出し元(PHP)にだけ返す。PHP はサーバーのログに残す
     return output(authed ? {ok:false, error: String(error && error.message || error).slice(0, 300)} : {ok:false});
   }
+}
+
+// 納品予定日の計算で休みとして扱う日。Google カレンダーの「日本の祝日」と、HOLIDAY_CALENDAR_IDS のカレンダーにある
+// 終日の予定を、今日から約13か月分返す。PHP が1日1回これを取りに来る。
+const JAPAN_HOLIDAY_CALENDAR = 'ja.japanese#holiday@group.v.calendar.google.com';
+
+function listHolidays(props) {
+  const ids = [JAPAN_HOLIDAY_CALENDAR, ...String(props.getProperty('HOLIDAY_CALENDAR_IDS') || '').split(',').map(id => id.trim()).filter(Boolean)];
+  const zone = Session.getScriptTimeZone();
+  const start = new Date();
+  const end = new Date(start.getTime() + 400 * 24 * 3600 * 1000);
+  const titles = {};
+  const missing = [];
+  ids.forEach(id => {
+    let calendar = CalendarApp.getCalendarById(id);
+    if (!calendar && id === JAPAN_HOLIDAY_CALENDAR) {
+      try { calendar = CalendarApp.subscribeToCalendar(id); } catch (error) { /* 下で missing に入る */ }
+    }
+    if (!calendar) { missing.push(id); return; }
+    calendar.getEvents(start, end).forEach(event => {
+      if (!event.isAllDayEvent()) return;
+      // 「日本の祝日」には、休みにならない行事(七五三・クリスマスなど。説明が「祭日」)も入っているので除く
+      if (id === JAPAN_HOLIDAY_CALENDAR && /祭日/.test(event.getDescription() || '')) return;
+      const last = event.getAllDayEndDate(); // 終了日は、最後の日の次の日
+      for (let day = event.getAllDayStartDate(); day < last; day = new Date(day.getTime() + 24 * 3600 * 1000)) {
+        titles[Utilities.formatDate(day, zone, 'yyyy-MM-dd')] = event.getTitle();
+      }
+    });
+  });
+  return { ok: true, holidays: Object.keys(titles).sort(), titles, missing };
 }
 
 // Script Properties の ID は、ブラウザのアドレス欄の URL をそのまま貼ってもよい

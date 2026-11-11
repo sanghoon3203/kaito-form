@@ -14,8 +14,9 @@ BAQOOL サポートのお問い合わせフォームです。図面と案件の�
 
 | パス | 内容 |
 |---|---|
-| `public/` | 公開フォルダに置くもの(`index.php`・`complete.php`・`.htaccess`) |
-| `src/` | 公開しないもの(処理・画面の共通部分・ロゴ)。`public/` と同じ階層に置きます |
+| `kaito-form.php` | WordPress プラグインとしての入口 |
+| `public/` | WordPress を使わないときに公開フォルダに置くもの(`index.php`・`complete.php`・`.htaccess`) |
+| `src/` | フォームの本体(処理・画面・ロゴ)。ブラウザからは開けないようにしてあります |
 | `data/` | 送信回数の記録と使用済みトークン。自動で作られます |
 | `Code.gs` | Google Apps Script |
 
@@ -26,7 +27,25 @@ BAQOOL サポートのお問い合わせフォームです。図面と案件の�
 - PHP 7.4 以上(curl・mbstring・openssl 拡張)
 - php.ini でのアップロードの上限。`upload_max_filesize` は 8M 以上、`post_max_size` は 90M 以上(添付の合計80MBに、入力欄の分を足した値)、`max_file_uploads` は 10 以上にします。これより小さい設定だと、フォームに表示する上限も自動でその値まで下がります
 
-## 設置
+## WordPress に設置する
+
+1. プラグインの zip を作ります。
+
+   ```
+   git archive --format=zip --prefix=kaito-form/ -o kaito-form.zip HEAD kaito-form.php src
+   ```
+
+2. WordPress の管理画面で「プラグイン → 新規追加 → プラグインのアップロード」から zip を入れ、有効化します。
+3. 「設定 → Kaito Form」に、Apps Script の URL・共有シークレット・Turnstile のサイトキーとシークレットキーを入れます。
+4. 固定ページの本文に `[kaito_form]` と書いて公開します。そのページがフォームになります。
+
+フォームのページは、テーマのヘッダーやフッターを通さずに、フォームの画面だけを表示します。テーマの CSS や JavaScript と混ざらないので、デザインも、スクリプトを制限するセキュリティ設定(CSP)も、単独で置いたときと同じです。
+
+- 送信回数の記録などは `wp-content/uploads/kaito-form/` に保存し、ブラウザからは開けないようにします。
+- WordPress が送信内容に足す `\` は、プラグインが外してから処理します。
+- フォームのページは、キャッシュしないように指示を出します。サーバー側のキャッシュ(Xserver の Xアクセラレータなど)を使っている場合は、フォームのページを対象から外してください。キャッシュされると、2人目以降が送信できなくなります。
+
+## WordPress を使わずに設置する
 
 1. `public/` の中身を公開フォルダに置き、その一つ上の階層に `src/` を置きます。
 2. `.env.example` を写して `.env` を作り、値を入れます。`.env` も公開フォルダの一つ上に置きます。
@@ -61,6 +80,7 @@ Google Apps Script のプロジェクトに `Code.gs` を貼り、ウェブア�
 | `NOTIFY_EMAIL` | 通知メールの宛先 |
 | `CASE_SHEET_ID` | 案件管理表のスプレッドシート ID。未設定なら案件管理表には書き込みません |
 | `CASE_SHEET_NAME` | 書き込むシート名。省略すると「案件基本情報」 |
+| `HOLIDAY_CALENDAR_IDS` | 会社の休業日を入れた Google カレンダーの ID(カンマ区切り)。省略すると日本の祝日だけ |
 | `DESIGN_SHEET_ID` | 設計用・顧客管理のスプレッドシート ID。未設定なら書き込みません |
 
 案件管理表を共有ドライブへ移したときは、`CASE_SHEET_ID` を新しい ID に変えるだけで切り替わります。Apps Script を動かすアカウントに、そのファイルの編集権限が必要です。
@@ -110,7 +130,8 @@ Google Apps Script のプロジェクトに `Code.gs` を貼り、ウェブア�
 - 例:金曜 15:00 に「1営業日」で申し込むと、月曜に作図して、納品予定日は火曜です。金曜 17:31 なら受付が月曜になり、納品予定日は水曜です。
 - 納期の短縮を選んだときは、希望納期がその日付と同じでなければ送信できません(画面で赤く知らせ、PHP でも確かめます)。
 - 画面では、納期の短縮を選ぶと希望納期がその日付に変わり、通常の納期より早い希望納期を選ぶと、間に合う短縮が自動で選ばれます。
-- 祝日は `src/lib.php` の `HOLIDAYS` に入れてあります(2027年まで)。年末年始などの休業日や、2028年以降の祝日は、ここに足してください。
+- 休みの日は、Google カレンダーから1日1回取ります。「日本の祝日」は自動で含め、会社の休業日は `HOLIDAY_CALENDAR_IDS` のカレンダーに終日の予定として入れます。カレンダーを直してからフォームに反映されるまで、最大1日かかります。
+- Google に接続できないときは、`src/lib.php` の `HOLIDAYS`(2027年までの祝日)で計算します。
 
 ## 通知メール
 
@@ -128,9 +149,13 @@ Google Apps Script のプロジェクトに `Code.gs` を貼り、ウェブア�
 
 ```
 php tests/smoke.php
+php tests/delivery.test.php
+php tests/wp-plugin.test.php
 node tests/case-row.test.js
 ```
 
 `smoke.php` は、`public/` と偽の Apps Script・偽のドライブ送信先をローカルで起動し、フォームの送信を通しで確かめます。入力チェック、ファイル形式のチェック、ボット対策も含みます。Google ドライブへの実際のアップロードは確かめません。
+
+`delivery.test.php` は、納品予定日の計算を確かめます。`wp-plugin.test.php` は、WordPress の代わりになる小さなスクリプトの上で、プラグインの入口を通しで確かめます。本物の WordPress と管理画面の設定ページは確かめません。
 
 `case-row.test.js` は、案件基本情報を真似た偽のシートで `Code.gs` の書き込みと PDF の検査を確かめます。

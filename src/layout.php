@@ -2,6 +2,8 @@
 // 画面の共通部分(上部バー・スタイル・フッター)。JavaScript は使わない。
 declare(strict_types=1);
 
+namespace KaitoForm;
+
 function asset_data_uri(string $file, string $mime): string {
   return 'data:' . $mime . ';base64,' . base64_encode((string) file_get_contents(__DIR__ . '/assets/' . $file));
 }

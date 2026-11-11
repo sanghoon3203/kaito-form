@@ -4,6 +4,9 @@ $data = json_decode(file_get_contents('php://input'), true);
 file_put_contents(sys_get_temp_dir() . '/kaito-mock-' . $data['action'] . '.json', json_encode($data, JSON_UNESCAPED_UNICODE));
 header('Content-Type: application/json');
 if (($data['secret'] ?? '') !== 'test-secret') exit(json_encode(['ok' => false]));
+if ($data['action'] === 'holidays') { // テストが置いたファイルがあれば、その日付を休業日として返す
+  exit(json_encode(['ok' => true, 'holidays' => json_decode((string) @file_get_contents(sys_get_temp_dir() . '/kaito-mock-holidays.json'), true) ?: []]));
+}
 if ($data['action'] === 'prepare') {
   exit(json_encode(['ok' => true, 'folderId' => 'FOLDER', 'uploads' => array_map(function ($f, $i) {
     return ['id' => "ID$i", 'size' => $f['size'], 'name' => $f['name'],

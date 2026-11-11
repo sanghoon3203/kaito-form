@@ -142,16 +142,24 @@ function appendByHeader(sheet, entries, memo, note, { insideLastRow = false, fir
     const loose = looseName(text);
     const same = options.find(option => looseName(option) === loose);
     if (same) return same;
-    const containing = options.filter(option => looseName(option).includes(loose));
-    return containing.length === 1 ? containing[0] : undefined;
+    // 支店名: 「支店」などを外した名前を含む選択肢を探す。複数あれば、HC(カフェ)かどうかで絞り、
+    // それでも複数なら、先頭の英字(LH・HC)を外して完全に一致するものにする
+    const wantsHc = /HC|カフェ/i.test(loose);
+    const core = loose.replace(/^(LH|HC|ロゴスホーム|ハウジングカフェ|カフェ)/i, '').replace(/(支店|営業所|店)$/, '');
+    if (!core) return undefined;
+    let found = options.filter(option => looseName(option).includes(core));
+    if (found.length > 1) found = found.filter(option => /^HC/i.test(option) === wantsHc);
+    if (found.length > 1) found = found.filter(option => looseName(option).replace(/^[A-Za-z]+/, '') === core);
+    return found.length === 1 ? found[0] : undefined;
   };
-  // entries の4つ目に { blankIfNoChoice: true } があれば、選択肢に合わないとき備考へ回さず空欄にする
-  entries.forEach(([names, value, format, { blankIfNoChoice = false } = {}]) => {
+  // entries の4つ目: blankIfNoChoice は、選択肢に合わないとき備考へ回さず空欄にする。
+  // fallback は、列がないときに備考へ書く文(省略時は「ヘッダー名：値」。空文字なら書かない)
+  entries.forEach(([names, value, format, { blankIfNoChoice = false, fallback } = {}]) => {
     const isDate = Boolean(value && value.day);
     const text = isDate ? value.day.replace(/-/g, '/') : String(value || '').trim();
     if (!text) return;
     const col = colOf([].concat(names).find(name => colOf(name)) || '');
-    if (!col) { leftover.push([].concat(names)[0] + '：' + text); return; }
+    if (!col) { leftover.push(fallback === undefined ? [].concat(names)[0] + '：' + text : fallback); return; }
     try {
       const cell = sheet.getRange(row, col);
       const allowed = isDate ? null : choices(cell);
@@ -165,8 +173,7 @@ function appendByHeader(sheet, entries, memo, note, { insideLastRow = false, fir
   return row;
 }
 
-// 備考は既存の行と同じく短くする。連絡先・住所・予定日・図面のリンクは、受付一覧と通知メールに残す
-const warningLines = data => (data.warnings || []).map(w => '【要注意】' + w);
+// 備考は既存の行と同じく短くする。連絡先・住所・予定日・図面のリンク・【要注意】は、受付一覧と通知メールに残す
 // 納品予定日(PHP が営業日で計算)は設計用・顧客管理の「図面納品日」に書く。短縮を選んだときだけ、備考にその内容を書く
 // 例:納期短縮：1営業日（+3万円）
 const rushLine = data => (data.rush && data.rush !== '希望しない'
@@ -175,9 +182,12 @@ const rushLine = data => (data.rush && data.rush !== '希望しない'
 function appendCaseRow(props, data, folderUrl) {
   const sheet = openCaseSheet(props);
   if (!sheet) return 'skipped';
-  const entries = CASE_COLUMNS.map(([name, pick]) => [name, CASE_DATE_COLUMNS.includes(name) ? day(pick(data)) : pick(data),
-    '', { blankIfNoChoice: name === '顧客支店名' }]);
-  return 'row ' + appendByHeader(sheet, entries, warningLines(data), data.note);
+  // 支店はロゴスホームだけに書く(ほかの会社は、既存の行でも空欄)
+  const logos = designTabName(data.company) === 'ロゴスホーム';
+  const entries = CASE_COLUMNS.map(([name, pick]) => name === '顧客支店名'
+    ? [name, logos ? data.branch : '', '', { blankIfNoChoice: true, fallback: '' }]
+    : [name, CASE_DATE_COLUMNS.includes(name) ? day(pick(data)) : pick(data)]);
+  return 'row ' + appendByHeader(sheet, entries, [], data.note);
 }
 
 // 作図担当・依頼者2・CAD依頼日・設計者・設計料・特許料・ステータスは社内で入力するので空欄のまま
@@ -189,16 +199,17 @@ function appendDesignRow(props, data, folderUrl) {
   if (!sheet) throw new Error('Design tab not found: ' + name);
   const entries = [
     ...(name === 'その他' ? [['会社名', data.company]] : []),
-    [['支店名', '支店'], data.branch, '', { blankIfNoChoice: true }],
+    // 支店はロゴスホームだけ列に書く。その他は備考に支店名を書き、豊栄・生杉・竹内には書かない
+    ...(name === 'ロゴスホーム' ? [[['支店名', '支店'], data.branch, '', { blankIfNoChoice: true, fallback: '' }]] : []),
     ['顧客名', data.projectName],
     ['依頼者', data.contact],
     ['PDF依頼日', day(Utilities.formatDate(new Date(), 'Asia/Tokyo', 'yyyy-MM-dd')), 'yy/mm/dd'],
     ['図面納品日', day(data.delivery || data.deadline), 'yy/mm/dd'], // 納品予定日
     ['引渡日', day(data.finish ? data.finish.slice(0, 8) + '01' : ''), 'yy/mm'], // 完工予定日の年月だけ
     ['案件番号', data.caseNumber],
-    ['床下暖房種別', data.heating], // ロゴスホームにだけある列。ほかのタブでは備考に入る
+    ['床下暖房種別', data.heating, '', { fallback: '床下' + data.heating }], // 列がないタブでは、既存の行と同じく備考に「床下AC」
   ];
-  return name + ' row ' + appendByHeader(sheet, entries, [rushLine(data), ...warningLines(data)], data.note,
+  return name + ' row ' + appendByHeader(sheet, entries, [rushLine(data), name === 'その他' ? data.branch : ''], data.note,
     { insideLastRow: true, firstHeader: '顧客名' });
 }
 
@@ -439,21 +450,27 @@ function notifyReceipt(data, filenames, folderUrl, spreadsheetUrl, caseResult, d
   const rush = data.rush && data.rush !== '希望しない' ? '【納期短縮】' : '';
   const { attachments, skipped } = mailAttachments(data);
   const subject = (warnings.length ? '【要注意】' : '') + rush + '【' + displayName + '】' + company + 'からの依頼が届いてます！';
+  const rows = [
+    ['案件番号', oneLine(data.caseNumber)],
+    ['支店名', oneLine(data.branch) || '-'],
+    ['担当者', oneLine(data.contact)],
+    ['メールアドレス', oneLine(data.email)],
+    ['案件名', oneLine(data.projectName)],
+    ['案件住所', oneLine(data.projectAddress)],
+    ['床下暖房種別', oneLine(data.heating) || '未定'],
+    ['着工予定日', oneLine(data.start) || '未定'],
+    ['完工予定日', oneLine(data.finish) || '未定'],
+    ['図面の希望納期', oneLine(data.deadline) || '-'],
+    ['納期の短縮', oneLine(data.rush) || '希望しない'],
+    ['納品予定日', oneLine(data.delivery) || '-'],
+  ];
+  // シートへの登録は、失敗したときだけ知らせる
+  const failures = [['案件管理表', caseResult], ['設計用・顧客管理', designResult]].filter(([, result]) => result === 'failed')
+    .map(([label]) => label + 'への登録に失敗しました。手入力してください。');
   const body = [
     company + 'から図面の提出がありました。',
     '',
-    '案件番号　' + oneLine(data.caseNumber),
-    '支店名　' + (oneLine(data.branch) || '-'),
-    '担当者　' + oneLine(data.contact),
-    'メールアドレス　' + oneLine(data.email),
-    '案件名　' + oneLine(data.projectName),
-    '案件住所　' + oneLine(data.projectAddress),
-    '床下暖房種別　' + (oneLine(data.heating) || '未定'),
-    '着工予定日　' + (oneLine(data.start) || '未定'),
-    '完工予定日　' + (oneLine(data.finish) || '未定'),
-    '図面の希望納期　' + (oneLine(data.deadline) || '-'),
-    '納期の短縮　' + (oneLine(data.rush) || '希望しない'),
-    '納品予定日　' + (oneLine(data.delivery) || '-'),
+    ...rows.map(([label, value]) => label + '　' + value),
     '',
     '添付ファイル（' + filenames.length + '件）',
     ...filenames.map(name => '・' + oneLine(name)),
@@ -461,19 +478,35 @@ function notifyReceipt(data, filenames, folderUrl, spreadsheetUrl, caseResult, d
       ...skipped.map(name => '　・' + oneLine(name))] : []),
     ...(warnings.length ? ['', '【要注意】添付ファイルの検査で、次の点が見つかりました（開くと動作を起こせる要素、または未検査のファイル）。',
       'ダウンロードせず、Google ドライブのプレビューで確認してください。', ...warnings.map(w => '・' + oneLine(w))] : []),
-    '',
-    '図面の保存先（Google ドライブ）',
-    folderUrl,
-    '',
-    '受付一覧',
-    spreadsheetUrl,
-    '',
-    ...[['案件管理表', caseResult], ['設計用・顧客管理', designResult]].map(([label, result]) =>
-      label + 'への登録　' + (result === 'failed' ? '失敗しました。手入力してください。' : result === 'skipped' ? '未設定' : result)),
+    ...(failures.length ? ['', ...failures] : []),
     ...(data.note ? ['', '備考', String(data.note)] : []),
   ].join('\n');
+
+  // HTML メール(カード型)。HTML を表示できないメールソフトには、上の本文が表示される
+  const esc = value => String(value).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+  const section = (title, lines, color) => !lines.length ? '' :
+    '<div style="margin-top:20px;padding:14px 16px;border-radius:8px;background:' + (color || '#f5f5f7') + ';font-size:13px;line-height:1.7">' +
+    '<div style="font-weight:700;margin-bottom:4px">' + esc(title) + '</div>' + lines.map(line => '<div>' + esc(line) + '</div>').join('') + '</div>';
+  const htmlBody =
+    '<div style="max-width:560px;margin:0 auto;padding:32px 28px;border:1px solid #dadce0;border-radius:12px;' +
+    'font-family:\'Noto Sans JP\',\'Hiragino Sans\',Meiryo,Arial,sans-serif;color:#1d1d1f">' +
+    '<div style="text-align:center;font-size:20px;font-weight:700;letter-spacing:.12em;color:#00a5a5">BAQOOL</div>' +
+    '<div style="text-align:center;font-size:24px;margin:14px 0 10px">新しい図面依頼</div>' +
+    '<div style="text-align:center;font-size:14px;color:#3c4043;margin-bottom:22px">' + esc(company) + '</div>' +
+    '<div style="border-top:1px solid #dadce0"></div>' +
+    '<table style="width:100%;border-collapse:collapse;margin-top:8px;font-size:14px">' +
+    rows.map(([label, value]) => '<tr><td style="padding:9px 0;color:#6e6e73;width:9em;vertical-align:top;border-bottom:1px solid #f0f0f2">' +
+      esc(label) + '</td><td style="padding:9px 0;border-bottom:1px solid #f0f0f2">' + esc(value) + '</td></tr>').join('') +
+    '</table>' +
+    section('添付ファイル（' + filenames.length + '件）', filenames.map(name => '・' + oneLine(name))) +
+    section('メールに添付していないファイル（要注意、または合計サイズの上限超過）', skipped.map(name => '・' + oneLine(name)), '#fff2f4') +
+    section('【要注意】添付ファイルの検査で見つかった点。ダウンロードせず、Google ドライブのプレビューで確認してください。',
+      warnings.map(w => '・' + oneLine(w)), '#fff2f4') +
+    section('シートへの登録', failures, '#fff2f4') +
+    section('備考', data.note ? String(data.note).split('\n') : []) +
+    '</div>';
   try {
-    MailApp.sendEmail({ to: recipient, name: displayName, subject, body, attachments });
+    MailApp.sendEmail({ to: recipient, name: displayName, subject, body, htmlBody, attachments });
     return 'sent';
   } catch (error) {
     console.error('Receipt notification failed');

@@ -81,7 +81,7 @@ assert.strictEqual(run(s, DATA), 'row 3');
 const row = s.cells[2];
 const col = name => HEADERS.indexOf(name);
 assert.strictEqual(row[col('顧客名')], "'=テスト工務店", 'formula injection is escaped');
-assert.strictEqual(row[col('顧客支店名')], '大阪支店');
+assert.strictEqual(row[col('顧客支店名')], undefined, '支店はロゴスホーム以外には書かない');
 assert.strictEqual(row[col('案件名')], '山田様邸');
 assert.strictEqual(row[col('床下暖房種別')], 'AC');
 assert.ok(row[col('着工予定日')] instanceof Date || Object.prototype.toString.call(row[col('着工予定日')]) === '[object Date]');
@@ -102,7 +102,7 @@ const noBranch = HEADERS.filter(h => h !== '顧客支店名');
 s = fakeSheet(noBranch, [], { rejectCol: noBranch.indexOf('顧客名') + 1 });
 run(s, DATA);
 const memo = s.cells[1][noBranch.indexOf('備考')];
-assert.ok(memo.includes('顧客名：=テスト工務店') && memo.includes('顧客支店名：大阪支店'), memo);
+assert.ok(memo.includes('顧客名：=テスト工務店') && !memo.includes('支店'), memo);
 assert.deepStrictEqual([...s.pending], [], 'a value outside the dropdown is never written to the cell');
 // 株式会社・㈱などの違いはプルダウンの表記に合わせて書く
 s = fakeSheet(HEADERS, [], { rejectCol: HEADERS.indexOf('顧客名') + 1 });
@@ -140,10 +140,10 @@ assert.deepStrictEqual([...warnings], [
 ]);
 assert.deepStrictEqual([...scan.trashed], ['fakeJww', 'fakePdf'], 'only disguised files are trashed');
 
-// 6. 警告は案件基本情報の備考にも残る
+// 6. 警告は備考に書かない
 s = fakeSheet(HEADERS, []);
 run(s, { ...DATA, warnings: ['b.pdf：/EmbeddedFiles'] });
-assert.ok(s.cells[1][col('備考')].includes('【要注意】b.pdf：/EmbeddedFiles'));
+assert.strictEqual(s.cells[1][col('備考')], '至急', '【要注意】は備考に書かない(通知メールにだけ書く)');
 
 // 7. Script Properties には ID の代わりに URL を貼ってもよい
 const props = v => ({ getProperty: () => v });
@@ -197,7 +197,7 @@ assert.ok(['作図担当', 'ステータス', '設計料(税抜)'].every(n => !h
 assert.ok(lastParsed.includes('2026-11-12@America/Los_Angeles') && hoei.formats['4,' + (h('図面納品日') + 1)] === 'yy/mm/dd', '納品予定日 goes to 図面納品日');
 const delivery = hoei.cells[3][h('図面納品日')];
 assert.ok(delivery.getFullYear() === 2026 && delivery.getMonth() === 10 && delivery.getDate() === 12);
-assert.strictEqual(hoei.cells[3][h('備考')], ['納期短縮：1営業日（+3万円）', '支店名：大阪支店', '床下暖房種別：AC', '至急'].join(String.fromCharCode(10)));
+assert.strictEqual(hoei.cells[3][h('備考')], ['納期短縮：1営業日（+3万円）', '床下AC', '至急'].join(String.fromCharCode(10)));
 assert.strictEqual(caseSheet.cells[2][HEADERS.indexOf('案件番号')], 'B2611-010', 'same number in 案件管理表');
 // ロゴスは半角カナでも当たり、床下暖房種別の列に入る
 runDesign({ ...DATA, company: 'ﾛｺﾞｽﾎｰﾑ', projectName: '田中 花子' });
@@ -206,6 +206,7 @@ assert.deepStrictEqual([logos.cells[2][0], logos.cells[2][1], logos.cells[2][14]
 // どれにも当たらない会社は「その他」の会社名列へ
 runDesign({ ...DATA, company: '山本工務店', projectName: '佐藤 一郎' });
 assert.deepStrictEqual([book['その他'].cells[2][0], book['その他'].cells[2][2], book['その他'].cells[2][15]], ['山本工務店', '佐藤 一郎', 'B2611-012']);
+assert.strictEqual(book['その他'].cells[2][13], ['納期短縮：1営業日（+3万円）', '大阪支店', '床下AC', '至急'].join(String.fromCharCode(10)), 'その他は備考に支店名');
 
 if (process.argv.includes('--show')) {
   const show = (name, sheet) => { console.log('\n[' + name + ']'); sheet.cells.forEach((r, i) => console.log(i + 1, JSON.stringify(sheet.cells[0].map((hd, j) => [hd || '(A)', r[j] instanceof Date ? r[j].toISOString().slice(0, 10) : r[j]]).filter(([, v]) => v !== '' && v !== undefined)))); };
@@ -213,14 +214,24 @@ if (process.argv.includes('--show')) {
 }
 // 9. 支店はプルダウンの中から、入力を含む選択肢が1つだけならそれを書く。合わなければ空欄(備考にも書かない)
 const BRANCH = HEADERS.indexOf('顧客支店名') + 1;
-s = fakeSheet(HEADERS, [], { lists: { [BRANCH]: ['LH札幌北', 'LH函館', '豊栄本社'] } });
-run(s, { ...DATA, branch: '札幌北' });
-assert.strictEqual(s.cells[1][BRANCH - 1], 'LH札幌北');
-s = fakeSheet(HEADERS, [], { lists: { [BRANCH]: ['LH札幌北', '豊栄札幌北'] } });
-run(s, { ...DATA, branch: '札幌北' });
-assert.strictEqual(s.cells[1][BRANCH - 1], undefined, 'two candidates: leave blank');
-assert.strictEqual(s.cells[1][HEADERS.indexOf('備考')], '至急');
-assert.deepStrictEqual([...s.pending], []);
+const BRANCHES = ['LH札幌北', 'LH札幌西', 'LH札幌南', 'HC札幌', 'LH帯広', 'LH函館', 'HC帯広', 'HC函館', 'LH登別・室蘭'];
+const branchFor = (branch, company = 'ロゴスホーム') => {
+  const sheet = fakeSheet(HEADERS, [], { lists: { [BRANCH]: BRANCHES } });
+  run(sheet, { ...DATA, company, branch });
+  assert.deepStrictEqual([...sheet.pending], []);
+  assert.strictEqual(sheet.cells[1][HEADERS.indexOf('備考')], '至急', 'branch never goes to 備考');
+  return sheet.cells[1][BRANCH - 1];
+};
+assert.strictEqual(branchFor('札幌北'), 'LH札幌北');
+assert.strictEqual(branchFor('札幌北支店'), 'LH札幌北');
+assert.strictEqual(branchFor('函館'), 'LH函館', 'LH and HC both exist: LH unless カフェ/HC is written');
+assert.strictEqual(branchFor('カフェ函館'), 'HC函館');
+assert.strictEqual(branchFor('HC札幌'), 'HC札幌');
+assert.strictEqual(branchFor('帯広店'), 'LH帯広');
+assert.strictEqual(branchFor('登別'), 'LH登別・室蘭');
+assert.strictEqual(branchFor('札幌'), undefined, '札幌北・西・南 のどれか分からないので空欄');
+assert.strictEqual(branchFor('新潟支店'), undefined);
+assert.strictEqual(branchFor('札幌北', '株式会社豊栄建設'), undefined, 'ロゴスホーム以外は空欄');
 
 // 10. 通知メールにはファイルを添付する。【要注意】のファイルと、合計の上限を超える分は添付しない
 const mail = load({ a: '%PDF-1.7 a', b: '%PDF-1.7 b', big: 'x', c: 'JwwData.' });
@@ -228,5 +239,18 @@ const picked = mail.mailAttachments({ warnings: ['b.pdf：/JavaScript'], files: 
   { id: 'a', name: 'a.pdf', size: 10 }, { id: 'b', name: 'b.pdf', size: 10 },
   { id: 'big', name: 'big.pdf', size: 19 * 1024 * 1024 }, { id: 'c', name: 'c.jww', size: 8 }] });
 assert.strictEqual(JSON.stringify([picked.attachments.map(a => a.name), picked.skipped]), JSON.stringify([['a.pdf', 'c.jww'], ['b.pdf', 'big.pdf']]));
+
+// 11. 通知メール: HTML のカードで送り、ドライブ・受付一覧のリンクと登録行は書かない。入力は HTML として解釈させない
+const sent = [];
+const mailer = load({ a: '%PDF-1.7 a' });
+mailer.PropertiesService = { getScriptProperties: () => ({ getProperty: () => 'to@example.com' }) };
+mailer.MailApp = { sendEmail: m => sent.push(m) };
+mailer.notifyReceipt({ ...DATA, company: '<b>A社</b>', caseNumber: 'B2611-001', warnings: [], files: [{ id: 'a', name: 'a.pdf', size: 10 }] },
+  ['a.pdf'], 'https://drive.google.com/drive/folders/F', 'https://docs.google.com/spreadsheets/d/X/edit', 'row 5', 'failed');
+assert.strictEqual(sent.length, 1);
+assert.ok(sent[0].htmlBody.includes('&lt;b&gt;A社&lt;/b&gt;') && !sent[0].htmlBody.includes('<b>A社'));
+assert.ok(sent[0].htmlBody.includes('B2611-001') && sent[0].htmlBody.includes('設計用・顧客管理への登録に失敗しました'));
+assert.ok(![sent[0].body, sent[0].htmlBody].some(t => t.includes('drive.google.com') || t.includes('docs.google.com') || t.includes('row 5')));
+assert.strictEqual(sent[0].attachments.length, 1);
 
 console.log('ok: case row tests passed');

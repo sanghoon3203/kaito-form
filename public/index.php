@@ -50,7 +50,7 @@ page_start('お問い合わせ | BAQOOL サポート');
       <h3>ご提出者</h3>
       <div class="grid">
         <div class="field"><label for="company">会社名<span class="req">必須</span></label><input id="company" name="company" autocomplete="organization" maxlength="100" required value="<?= $v('company') ?>"></div>
-        <div class="field"><label for="branch">支店名<span class="req">必須</span></label><input id="branch" name="branch" maxlength="100" required aria-describedby="branch-hint" value="<?= $v('branch') ?>"><p class="hint" id="branch-hint">施工を担当される支店名をご入力ください。</p></div>
+        <div class="field"><label for="branch">支店名<span class="req">必須</span></label><input id="branch" name="branch" maxlength="100" required placeholder="例：新潟支店" aria-describedby="branch-hint" value="<?= $v('branch') ?>"><p class="hint" id="branch-hint">施工を担当される支店名をご入力ください。</p></div>
       </div>
       <div class="field"><label for="contact">ご担当者名<span class="req">必須</span></label><input id="contact" name="contact" autocomplete="name" maxlength="100" required value="<?= $v('contact') ?>"></div>
       <div class="field"><label for="email">メールアドレス<span class="req">必須</span></label><input id="email" name="email" type="email" inputmode="email" autocomplete="email" maxlength="254" required pattern="[\x21-\x7E]+@[\x21-\x7E]+\.[\x21-\x7E]+" title="半角英数字でご入力ください" value="<?= $v('email') ?>"></div>

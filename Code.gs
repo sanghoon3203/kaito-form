@@ -167,9 +167,8 @@ function appendByHeader(sheet, entries, memo, note, { insideLastRow = false, fir
 
 // 備考は既存の行と同じく短くする。連絡先・住所・予定日・図面のリンクは、受付一覧と通知メールに残す
 const warningLines = data => (data.warnings || []).map(w => '【要注意】' + w);
-// 希望納期は設計用・顧客管理にだけ書く(例:希望納期：26/11/20（翌営業日（+3万円）））
-const deadlineLine = data => !data.deadline ? '' : '希望納期：' + data.deadline.slice(2).replace(/-/g, '/') +
-  (data.rush && data.rush !== '希望しない' ? '（' + data.rush + '）' : '');
+// 希望納期は設計用・顧客管理の「図面納品日」に書く。短縮を選んだときだけ、備考にその内容を書く
+const rushLine = data => (data.rush && data.rush !== '希望しない' ? '納期短縮：' + data.rush : '');
 
 function appendCaseRow(props, data, folderUrl) {
   const sheet = openCaseSheet(props);
@@ -179,7 +178,7 @@ function appendCaseRow(props, data, folderUrl) {
   return 'row ' + appendByHeader(sheet, entries, warningLines(data), data.note);
 }
 
-// 作図担当・依頼者2・CAD依頼日・設計者・図面納品日・設計料・特許料・ステータスは社内で入力するので空欄のまま
+// 作図担当・依頼者2・CAD依頼日・設計者・設計料・特許料・ステータスは社内で入力するので空欄のまま
 function appendDesignRow(props, data, folderUrl) {
   const id = idProperty(props, 'DESIGN_SHEET_ID');
   if (!id) return 'skipped';
@@ -192,11 +191,12 @@ function appendDesignRow(props, data, folderUrl) {
     ['顧客名', data.projectName],
     ['依頼者', data.contact],
     ['PDF依頼日', day(Utilities.formatDate(new Date(), 'Asia/Tokyo', 'yyyy-MM-dd')), 'yy/mm/dd'],
+    ['図面納品日', day(data.deadline), 'yy/mm/dd'], // 図面の希望納期
     ['引渡日', day(data.finish ? data.finish.slice(0, 8) + '01' : ''), 'yy/mm'], // 完工予定日の年月だけ
     ['案件番号', data.caseNumber],
     ['床下暖房種別', data.heating], // ロゴスホームにだけある列。ほかのタブでは備考に入る
   ];
-  return name + ' row ' + appendByHeader(sheet, entries, [deadlineLine(data), ...warningLines(data)], data.note,
+  return name + ' row ' + appendByHeader(sheet, entries, [rushLine(data), ...warningLines(data)], data.note,
     { insideLastRow: true, firstHeader: '顧客名' });
 }
 

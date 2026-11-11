@@ -193,8 +193,11 @@ assert.strictEqual(hoei.cells[3][h('案件番号')], 'B2611-010');
 assert.strictEqual(hoei.formats['4,' + (h('PDF依頼日') + 1)], 'yy/mm/dd');
 const handover = hoei.cells[3][h('引渡日')];
 assert.ok(handover.getFullYear() === 2027 && handover.getMonth() === 1 && handover.getDate() === 1 && hoei.formats['4,' + (h('引渡日') + 1)] === 'yy/mm');
-assert.ok(['作図担当', 'ステータス', '図面納品日', '設計料(税抜)'].every(n => !hoei.cells[3][h(n)]), 'internal columns stay blank');
-assert.strictEqual(hoei.cells[3][h('備考')], ['希望納期：26/11/20（翌営業日（+3万円））', '支店名：大阪支店', '床下暖房種別：AC', '至急'].join(String.fromCharCode(10)));
+assert.ok(['作図担当', 'ステータス', '設計料(税抜)'].every(n => !hoei.cells[3][h(n)]), 'internal columns stay blank');
+assert.ok(lastParsed.includes('2026-11-20@America/Los_Angeles') && hoei.formats['4,' + (h('図面納品日') + 1)] === 'yy/mm/dd', '希望納期 goes to 図面納品日');
+const delivery = hoei.cells[3][h('図面納品日')];
+assert.ok(delivery.getFullYear() === 2026 && delivery.getMonth() === 10 && delivery.getDate() === 20);
+assert.strictEqual(hoei.cells[3][h('備考')], ['納期短縮：翌営業日（+3万円）', '支店名：大阪支店', '床下暖房種別：AC', '至急'].join(String.fromCharCode(10)));
 assert.strictEqual(caseSheet.cells[2][HEADERS.indexOf('案件番号')], 'B2611-010', 'same number in 案件管理表');
 // ロゴスは半角カナでも当たり、床下暖房種別の列に入る
 runDesign({ ...DATA, company: 'ﾛｺﾞｽﾎｰﾑ', projectName: '田中 花子' });

@@ -110,7 +110,11 @@ try {
   [$s, $body] = request('index.php', $form(['deadline' => '2026-11-20']));
   check('rush with a different desired date is rejected', $s === 422 && strpos($body, '図面の希望納期は 2026/11/16（月） になります') !== false);
   [$s, $body] = request('index.php', $form(['rush' => '希望しない', 'deadline' => '2026-11-20']));
-  check('no rush accepts any desired date', $s === 303);
+  check('no rush accepts a desired date on or after the normal date', $s === 303);
+  [$s, $body] = request('index.php', $form(['rush' => '希望しない', 'deadline' => '2026-11-17']));
+  check('no rush with a desired date before the normal date is rejected', $s === 422 && strpos($body, '2026/11/18（水） 以降') !== false);
+  [$s, $body] = request('index.php', $form(['heating' => '未定']));
+  check('未定 is no longer a heating type', $s === 422 && strpos($body, '床下暖房種別をご確認ください') !== false);
   foreach (['2026-11-30', '2026-12-01'] as $finish) {
     [$s, $body] = request('index.php', $form(['finish' => $finish]));
     check("完工予定日 $finish (着工 2026-12-01) is rejected", $s === 422 && strpos($body, '完工予定日は、着工予定日より後') !== false);

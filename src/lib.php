@@ -251,7 +251,7 @@ function add_business_days(DateTimeImmutable $d, int $n): DateTimeImmutable {
 /**
  * 図面の納品予定日(Y-m-d)。受付日(営業時間を過ぎていれば翌営業日)は数えず、作図に営業日数ぶんかかり、
  * その次の営業日に納品する(例:金曜15時に「1営業日」→ 月曜に作図、火曜に納品)。
- * 短縮なしは4営業日。希望納期がその納品日より後なら希望納期。
+ * 短縮なしは4営業日。希望納期がその納品日より後なら希望納期(休みの日なら、次の営業日)。
  */
 function delivery_date(string $rush, string $deadline, ?DateTimeImmutable $now = null): string {
   $now = $now ?? now_tokyo();
@@ -260,7 +260,11 @@ function delivery_date(string $rush, string $deadline, ?DateTimeImmutable $now =
   $days = RUSH_OPTIONS[$rush] ?? RUSH_OPTIONS['希望しない'];
   $date = add_business_days($received, $days + 1)->format('Y-m-d');
   $noRush = $days === RUSH_OPTIONS['希望しない'];
-  return $noRush && preg_match('/^\d{4}-\d{2}-\d{2}$/D', $deadline) && $deadline > $date ? $deadline : $date;
+  if (!($noRush && preg_match('/^\d{4}-\d{2}-\d{2}$/D', $deadline) && $deadline > $date)) return $date;
+  // 希望納期が土日・祝日・休業日なら、次の営業日に納品する
+  $wish = new DateTimeImmutable($deadline, new DateTimeZone('Asia/Tokyo'));
+  while (!is_business_day($wish)) $wish = $wish->modify('+1 day');
+  return $wish->format('Y-m-d');
 }
 
 /** 2026-11-17 → 2026/11/17（火） */
@@ -292,7 +296,7 @@ function validate_fields(array $post): array {
       preg_match('/[^\x21-\x7e]/', $fields['email']))) { // 半角・全角スペースや全角文字を含むものは受け付けない
     $errors[] = 'メールアドレスは半角英数字でご入力ください。';
   }
-  if ($fields['heating'] !== '' && $fields['heating'] !== '未定' && !in_array($fields['heating'], HEATING_TYPES, true)) $errors[] = '床下暖房種別をご確認ください。';
+  if ($fields['heating'] !== '' && !in_array($fields['heating'], HEATING_TYPES, true)) $errors[] = '床下暖房種別をご確認ください。';
   if ($fields['pref'] !== '' && !in_array($fields['pref'], PREFECTURES, true)) $errors[] = '都道府県をご確認ください。';
   if ($fields['rush'] !== '' && !isset(RUSH_OPTIONS[$fields['rush']])) $errors[] = '納期の短縮をご確認ください。';
   foreach (['start' => '着工予定日', 'finish' => '完工予定日', 'deadline' => '図面の希望納期'] as $name => $label) {
@@ -303,6 +307,10 @@ function validate_fields(array $post): array {
   }
   // 完工予定日は、着工予定日より後でなければならない
   if (!$errors && $fields['finish'] <= $fields['start']) $errors[] = '完工予定日は、着工予定日より後の日付にしてください。';
+  // 短縮を希望しないのに、通常の納期より早い希望納期は受け付けない
+  if (!$errors && $fields['rush'] === '希望しない' && $fields['deadline'] < delivery_date('希望しない', '')) {
+    $errors[] = '図面の希望納期は ' . jp_date(delivery_date('希望しない', '')) . ' 以降にするか、納期の短縮をお選びください。';
+  }
   // 納期の短縮を選んだら、希望納期はその営業日数後の日付でなければならない
   if (!$errors && $fields['rush'] !== '希望しない') {
     $rushDate = delivery_date($fields['rush'], '');
@@ -313,7 +321,6 @@ function validate_fields(array $post): array {
   // 案件管理表には「案件名」「案件住所」の1列ずつで書く
   $fields['projectName'] = $fields['projectSei'] . '　' . $fields['projectMei']; // 既存の行と同じく全角スペース
   $fields['projectAddress'] = $fields['pref'] . $fields['city'] . $fields['street'];
-  if ($fields['heating'] === '未定') $fields['heating'] = ''; // 案件管理表では空欄が未定
   $fields['delivery'] = delivery_date($fields['rush'], $fields['deadline']); // 納品予定日は送信された時刻で決める
   return [$fields, array_values(array_unique($errors))];
 }

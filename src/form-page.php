@@ -86,7 +86,7 @@ page_start('お問い合わせ | BAQOOL サポート');
       </fieldset>
       <div class="field"><label for="heating">床下暖房種別<span class="req">必須</span></label><select id="heating" name="heating" required>
         <option value="">選択してください</option>
-        <?php foreach (['放熱器' => '放熱器', 'AC' => 'AC', 'ﾌｧﾝｺﾝﾍﾞｸﾀｰ' => 'ファンコンベクター', '未定' => '未定'] as $value => $label): ?>
+        <?php foreach (['放熱器' => '放熱器', 'AC' => 'AC', 'ﾌｧﾝｺﾝﾍﾞｸﾀｰ' => 'ファンコンベクター'] as $value => $label): ?>
           <option value="<?= h($value) ?>"<?= ($values['heating'] ?? '') === $value ? ' selected' : '' ?>><?= h($label) ?></option>
         <?php endforeach; ?>
       </select></div>
@@ -95,7 +95,7 @@ page_start('お問い合わせ | BAQOOL サポート');
         <div class="field"><label for="finish">完工予定日<span class="req">必須</span></label><input id="finish" name="finish" type="date" required aria-describedby="finish-hint" value="<?= $v('finish') ?>"><p class="hint" id="finish-hint">おおよその日付で構いません。</p><p class="file-error" id="finish-error" role="alert"></p></div>
       </div>
       <div class="grid">
-        <div class="field"><label for="deadline">図面の希望納期<span class="req">必須</span></label><input id="deadline" name="deadline" type="date" required aria-describedby="deadline-hint" value="<?= $v('deadline') ?>"><p class="hint" id="deadline-hint">お申し込み日を除いて4営業日かかり、その翌営業日の納品となります。</p><p class="file-error" id="deadline-error" role="alert"></p></div>
+        <div class="field"><label for="deadline">図面の希望納期<span class="req">必須</span></label><input id="deadline" name="deadline" type="date" required aria-describedby="deadline-hint" value="<?= $v('deadline') ?>"><p class="hint" id="deadline-hint">お申し込み日を除いて4営業日かかり、その翌営業日の納品となります。土日・祝日は選べません（翌営業日になります）。</p><p class="file-error" id="deadline-error" role="alert"></p></div>
         <div class="field"><label for="rush">納期の短縮<span class="req">必須</span></label><select id="rush" name="rush" required aria-describedby="rush-hint">
           <?php foreach (array_keys(RUSH_OPTIONS) as $rush): ?><option<?= ($values['rush'] ?? '') === $rush ? ' selected' : '' ?>><?= h($rush) ?></option><?php endforeach; ?>
         </select><p class="hint" id="rush-hint">納期の短縮には追加料金がかかります。希望納期に合わせて自動で選ばれます。</p></div>
@@ -113,7 +113,8 @@ page_start('お問い合わせ | BAQOOL サポート');
       $lateIn = is_business_day($now) && $now < $closesAt ? ($closesAt->getTimestamp() - $now->getTimestamp()) * 1000 : '';
       ?>
       <div class="field delivery" id="delivery" data-dates="<?= h(json_encode($datesAt($now), JSON_UNESCAPED_UNICODE)) ?>"
-        data-late-dates="<?= h(json_encode($datesAt($now->setTime(23, 59)), JSON_UNESCAPED_UNICODE)) ?>" data-late-in="<?= h((string) $lateIn) ?>">
+        data-late-dates="<?= h(json_encode($datesAt($now->setTime(23, 59)), JSON_UNESCAPED_UNICODE)) ?>" data-late-in="<?= h((string) $lateIn) ?>"
+        data-holidays="<?= h(json_encode(holidays())) ?>">
         <span class="label">納品予定日（目安）</span>
         <p class="delivery-date"><output id="delivery-date" for="deadline rush"><?= h(jp_date(delivery_date($values['rush'] ?? '', $values['deadline'] ?? ''))) ?></output></p>
         <p class="hint">受付時間（平日 8:30〜17:30）を過ぎたお申し込みは、翌営業日の受付として計算します。</p>
@@ -244,18 +245,30 @@ page_start('お問い合わせ | BAQOOL サポート');
   const jp = date => { const [y, m, d] = date.split('-').map(Number); return date.replaceAll('-', '/') + '（' + '日月火水木金土'[new Date(y, m - 1, d).getDay()] + '）'; };
   let mismatch = false;
   const current = () => (lateAt !== null && Date.now() >= lateAt ? late : early);
+  // 土日・祝日・休業日を希望納期に選んだら、次の営業日に進める
+  const holidays = JSON.parse(box.dataset.holidays);
+  const ymd = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  const nextBusinessDay = date => {
+    const [y, m, d] = date.split('-').map(Number);
+    const day = new Date(y, m - 1, d);
+    while (day.getDay() === 0 || day.getDay() === 6 || holidays.includes(ymd(day))) day.setDate(day.getDate() + 1);
+    return ymd(day);
+  };
   const NONE = '希望しない';
   // 納期の短縮を選んだら、希望納期をその日付にする
   const followRush = () => {
     const rush = form.elements.rush.value;
-    if (rush !== NONE && current()[rush]) form.elements.deadline.value = current()[rush];
+    const dates = current();
+    if (rush !== NONE && dates[rush]) form.elements.deadline.value = dates[rush];
+    // 「希望しない」に戻したら、短縮の日付のままにせず、通常の納期に戻す
+    if (rush === NONE && form.elements.deadline.value !== '' && form.elements.deadline.value < dates[NONE]) form.elements.deadline.value = dates[NONE];
   };
   // 希望納期が通常の納期より早ければ、間に合う短縮を自動で選ぶ。通常の納期以降なら短縮を外す
   const followDeadline = () => {
     const dates = current();
     const wish = form.elements.deadline.value;
     if (!wish) return;
-    if (wish >= dates[NONE]) { form.elements.rush.value = NONE; return; }
+    if (wish >= dates[NONE]) { form.elements.rush.value = NONE; form.elements.deadline.value = nextBusinessDay(wish); return; }
     const rush = Object.keys(dates).filter(key => key !== NONE).sort((a, b) => (dates[a] < dates[b] ? -1 : 1)).find(key => dates[key] >= wish);
     if (rush) { form.elements.rush.value = rush; form.elements.deadline.value = dates[rush]; }
   };

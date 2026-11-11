@@ -253,6 +253,26 @@ function appendDesignRow(props, data, folderUrl) {
     { insideLastRow: true, firstHeader: '顧客名' });
 }
 
+// ドライブのフォルダ名。豊栄・ロゴス・生杉・竹内は、入力の表記にかかわらず決まった名前にする
+// (「ロゴス」「ﾛｺﾞｽﾎｰﾑ株式会社」→「ロゴスホーム」)。そのほかの会社は、入力を全角・半角だけそろえて使う
+function companyFolderName(company) {
+  const tab = designTabName(company);
+  return tab === 'その他' ? String(company).normalize('NFKC').replace(/\s+/g, ' ').trim() : tab;
+}
+
+// 同じ名前のフォルダを探し、なければ作る。株式会社・㈱の有無、空白、全角と半角の違いは同じ名前とみなす
+// (「株式会社 豊栄建設」と「豊栄建設㈱」、「山田　太郎」と「山田 太郎」)。
+// ponytail: 親フォルダの直下を全部見る。フォルダが数千を超えて遅くなったら、名前の対応表を持つ
+function findOrCreateFolder(parent, name) {
+  const key = looseName(name);
+  const folders = parent.getFolders();
+  while (folders.hasNext()) {
+    const folder = folders.next();
+    if (looseName(folder.getName()) === key) return folder;
+  }
+  return parent.createFolder(name);
+}
+
 function prepareDriveUploads(props, data) {
   const root = DriveApp.getFolderById(idProperty(props, 'ROOT_FOLDER_ID'));
   if (data.files.some(file => !(file.size > 0 && file.size <= 8 * 1024 * 1024))) return { ok: false }; // src/lib.php と同じ上限(1ファイル8MB)
@@ -262,11 +282,10 @@ function prepareDriveUploads(props, data) {
   lock.waitLock(25000);
   let folderId;
   try {
-    // 保存先は「会社名/案件名」。同じ名前のフォルダがあれば、それを使う
-    const child = (parent, name) => { const found = parent.getFoldersByName(name); return found.hasNext() ? found.next() : parent.createFolder(name); };
-    const companyFolder = child(root, company);
+    // 保存先は「会社名/案件名」。表記が少し違うだけのフォルダがあれば、それを使う
+    const companyFolder = findOrCreateFolder(root, companyFolderName(company));
     const project = String(data.projectName || '').replace(/[\/\\\x00-\x1f]/g, ' ').trim();
-    folderId = (project ? child(companyFolder, project) : companyFolder).getId();
+    folderId = (project ? findOrCreateFolder(companyFolder, project) : companyFolder).getId();
   } finally {
     lock.releaseLock();
   }

@@ -257,4 +257,25 @@ assert.ok(![sent[0].body, sent[0].htmlBody].some(t => t.includes('drive.google.c
 assert.strictEqual(sent[0].attachments.length, 1);
 assert.ok(sent[0].htmlBody.includes('cid:baqoolLogo') && sent[0].inlineImages.baqoolLogo && sent[0].body.includes('会社名　<b>A社</b>'));
 
+// 12. ドライブのフォルダ: 表記が違うだけなら同じフォルダを使う
+const drive = load();
+const fakeParent = names => {
+  const created = [];
+  const folders = names.map(n => ({ getName: () => n }));
+  return { created, getFolders: () => { let i = 0; return { hasNext: () => i < folders.length, next: () => folders[i++] }; },
+    createFolder: n => { created.push(n); const f = { getName: () => n }; folders.push(f); return f; } };
+};
+assert.strictEqual(JSON.stringify(['ロゴス', 'ﾛｺﾞｽﾎｰﾑ株式会社', '株式会社ロゴスホーム 札幌', '㈱豊栄建設', '生杉建設', '竹内建設（株）']
+  .map(c => drive.companyFolderName(c))), JSON.stringify(['ロゴスホーム', 'ロゴスホーム', 'ロゴスホーム', '豊栄建設', '生杉建設', '竹内建設']));
+assert.strictEqual(drive.companyFolderName('山田工務店　新潟'), '山田工務店 新潟');
+let parent = fakeParent(['株式会社 豊栄建設', '山田工務店']);
+assert.strictEqual(drive.findOrCreateFolder(parent, '豊栄建設').getName(), '株式会社 豊栄建設');
+assert.strictEqual(drive.findOrCreateFolder(parent, '㈱山田工務店').getName(), '山田工務店');
+assert.strictEqual(parent.created.length, 0, 'no new folder when only the spelling differs');
+parent = fakeParent(['山田　太郎']);
+assert.strictEqual(drive.findOrCreateFolder(parent, '山田 太郎').getName(), '山田　太郎');
+drive.findOrCreateFolder(parent, '山田　次郎');
+drive.findOrCreateFolder(parent, '山田 次郎');
+assert.strictEqual(JSON.stringify(parent.created), JSON.stringify(['山田　次郎']), 'created once, then reused');
+
 console.log('ok: case row tests passed');

@@ -65,6 +65,9 @@ try {
   check('the completion page links back to the form page', $s === 200 && strpos($body, '受け付けました') !== false &&
     strpos($body, 'href="http://127.0.0.1:8796/support/"') !== false && strpos($body, 'THEME PAGE') === false);
 
+  [$s, $body] = request('/support/?locked=1');
+  check('a password-protected page is left to WordPress', strpos($body, 'THEME PAGE') !== false && strpos($body, 'name="drawing[]"') === false);
+
   check('the data folder under uploads is closed to browsers', is_file("$uploads/kaito-form/.htaccess") &&
     strpos((string) file_get_contents("$uploads/kaito-form/.htaccess"), 'denied') !== false);
 } finally {

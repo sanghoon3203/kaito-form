@@ -32,6 +32,8 @@ add_action('template_redirect', function () {
   if (!is_singular()) return;
   $post = get_post();
   if (!$post || !has_shortcode((string) $post->post_content, 'kaito_form')) return;
+  // パスワード付きのページでは、WordPress のパスワード入力画面をそのまま出す(フォームを先に見せない)
+  if (post_password_required($post)) return;
 
   // このページはキャッシュさせない(1回だけ使えるトークンと、その時刻の納品予定日が入っているため)
   if (!defined('DONOTCACHEPAGE')) define('DONOTCACHEPAGE', true);

@@ -8,6 +8,7 @@ function __return_empty_string() { return ''; }
 function is_singular() { return true; }
 function get_post() { return (object) ['post_content' => '<p>[kaito_form]</p>']; }
 function has_shortcode($content, $tag) { return strpos($content, "[$tag") !== false; }
+function post_password_required($post) { return isset($_GET['locked']); } // ?locked でパスワード付きのページを再現する
 function nocache_headers() { header('Cache-Control: no-cache, must-revalidate, max-age=0'); }
 function get_option($key, $default = false) { return json_decode((string) file_get_contents(getenv('KAITO_WP_OPTIONS')), true); }
 function wp_upload_dir() { return ['basedir' => getenv('KAITO_WP_UPLOADS')]; }

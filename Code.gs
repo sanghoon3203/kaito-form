@@ -410,6 +410,25 @@ function verifyUploadAccess() {
   });
 }
 
+// メールに添付する合計サイズの上限(Gmail の上限は25MB。符号化で増える分を見込む)
+const MAIL_ATTACH_LIMIT = 18 * 1024 * 1024;
+
+// 通知メールに添付するファイルを選ぶ。【要注意】のファイル(開かないほうがよいもの)と、上限を超える分は添付しない
+function mailAttachments(data) {
+  const flagged = new Set((data.warnings || []).map(w => String(w).split('：')[0]));
+  const attachments = [];
+  const skipped = [];
+  let total = 0;
+  (data.files || []).forEach(file => {
+    if (flagged.has(file.name) || total + file.size > MAIL_ATTACH_LIMIT) { skipped.push(file.name); return; }
+    try {
+      attachments.push(DriveApp.getFileById(file.id).getBlob().setName(file.name));
+      total += file.size;
+    } catch (error) { skipped.push(file.name); }
+  });
+  return { attachments, skipped };
+}
+
 function notifyReceipt(data, filenames, folderUrl, spreadsheetUrl, caseResult, designResult) {
   const displayName = '株式会社カイトー商会 申込受付';
   const recipient = PropertiesService.getScriptProperties().getProperty('NOTIFY_EMAIL');
@@ -418,6 +437,7 @@ function notifyReceipt(data, filenames, folderUrl, spreadsheetUrl, caseResult, d
   const company = oneLine(data.company);
   const warnings = data.warnings || [];
   const rush = data.rush && data.rush !== '希望しない' ? '【納期短縮】' : '';
+  const { attachments, skipped } = mailAttachments(data);
   const subject = (warnings.length ? '【要注意】' : '') + rush + '【' + displayName + '】' + company + 'からの依頼が届いてます！';
   const body = [
     company + 'から図面の提出がありました。',
@@ -437,6 +457,8 @@ function notifyReceipt(data, filenames, folderUrl, spreadsheetUrl, caseResult, d
     '',
     '添付ファイル（' + filenames.length + '件）',
     ...filenames.map(name => '・' + oneLine(name)),
+    ...(skipped.length ? ['※ 次のファイルはメールに添付していません（要注意、または合計サイズの上限超過）。Google ドライブでご確認ください。',
+      ...skipped.map(name => '　・' + oneLine(name))] : []),
     ...(warnings.length ? ['', '【要注意】添付ファイルの検査で、次の点が見つかりました（開くと動作を起こせる要素、または未検査のファイル）。',
       'ダウンロードせず、Google ドライブのプレビューで確認してください。', ...warnings.map(w => '・' + oneLine(w))] : []),
     '',
@@ -451,7 +473,7 @@ function notifyReceipt(data, filenames, folderUrl, spreadsheetUrl, caseResult, d
     ...(data.note ? ['', '備考', String(data.note)] : []),
   ].join('\n');
   try {
-    MailApp.sendEmail({ to: recipient, name: displayName, subject, body });
+    MailApp.sendEmail({ to: recipient, name: displayName, subject, body, attachments });
     return 'sent';
   } catch (error) {
     console.error('Receipt notification failed');

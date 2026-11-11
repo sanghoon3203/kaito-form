@@ -41,7 +41,7 @@ function load(files = {}) {
       // シートのタイムゾーンで暦日を日付にする(呼ばれ方を記録する)
       parseDate: (str, tz) => { parsed.push(str + '@' + tz); const [y, m, d] = str.split('-').map(Number); return new Date(y, m - 1, d); }, newBlob: b => ({ getDataAsString: () => Buffer.from(b).toString('latin1') }) },
     DriveApp: { getFileById: id => ({
-      getBlob: () => ({ getBytes: () => Buffer.from(files[id], 'latin1') }),
+      getBlob: () => { const blob = { getBytes: () => Buffer.from(files[id], 'latin1'), setName: n => { blob.name = n; return blob; } }; return blob; },
       setTrashed: () => trashed.push(id),
     }) },
     ScriptApp: { getOAuthToken: () => 'token' },
@@ -221,5 +221,12 @@ run(s, { ...DATA, branch: '札幌北' });
 assert.strictEqual(s.cells[1][BRANCH - 1], undefined, 'two candidates: leave blank');
 assert.strictEqual(s.cells[1][HEADERS.indexOf('備考')], '至急');
 assert.deepStrictEqual([...s.pending], []);
+
+// 10. 通知メールにはファイルを添付する。【要注意】のファイルと、合計の上限を超える分は添付しない
+const mail = load({ a: '%PDF-1.7 a', b: '%PDF-1.7 b', big: 'x', c: 'JwwData.' });
+const picked = mail.mailAttachments({ warnings: ['b.pdf：/JavaScript'], files: [
+  { id: 'a', name: 'a.pdf', size: 10 }, { id: 'b', name: 'b.pdf', size: 10 },
+  { id: 'big', name: 'big.pdf', size: 19 * 1024 * 1024 }, { id: 'c', name: 'c.jww', size: 8 }] });
+assert.strictEqual(JSON.stringify([picked.attachments.map(a => a.name), picked.skipped]), JSON.stringify([['a.pdf', 'c.jww'], ['b.pdf', 'big.pdf']]));
 
 console.log('ok: case row tests passed');

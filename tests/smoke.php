@@ -90,6 +90,8 @@ try {
   check('finish sends all case fields', ($done['projectAddress'] ?? '') === '大阪府大阪市1-2-3' && ($done['heating'] ?? '') === 'ﾌｧﾝｺﾝﾍﾞｸﾀｰ' &&
     ($done['projectName'] ?? '') === '山田　太郎' && ($done['finish'] ?? '') === '2026-12-20' && ($done['rush'] ?? '') === '2営業日（+2万円）' && preg_match('/^\d{4}-\d{2}-\d{2}$/', $done['delivery'] ?? '') === 1 &&
     ($done['folderId'] ?? '') === 'FOLDER' && count($done['files'] ?? []) === 2 && !isset($done['website']) && !isset($done['token']));
+  $prepare = json_decode((string) @file_get_contents("$tmp/kaito-mock-prepare.json"), true);
+  check('prepare names the company and the project for the Drive folder', ($prepare['company'] ?? '') === 'テスト工務店' && ($prepare['projectName'] ?? '') === '山田　太郎');
   check('files reach Drive unchanged', @file_get_contents("$tmp/kaito-upload-ID0.bin") === $pdf && @file_get_contents("$tmp/kaito-upload-ID1.bin") === $jww);
 
   [$s, $body] = request('index.php', ['token' => $post['token']] + $post);

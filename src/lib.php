@@ -433,7 +433,7 @@ function upload_to_drive(array $file, string $url): void {
 /** 受付の本体。ドライブへの保存と記録を Apps Script に頼む */
 function submit_receipt(array $fields, array $files): void {
   @set_time_limit(900);
-  $prepared = script_request(['action' => 'prepare', 'company' => $fields['company'],
+  $prepared = script_request(['action' => 'prepare', 'company' => $fields['company'], 'projectName' => $fields['projectName'],
     'files' => array_map(function ($f) { return ['name' => $f['name'], 'size' => $f['size']]; }, $files)]);
   foreach ($prepared['uploads'] as $i => $upload) upload_to_drive($files[$i], (string) $upload['url']);
   // Apps Script が PDF の中身を検査するので、記録の完了まで数分かかることがある

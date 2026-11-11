@@ -6,7 +6,7 @@ BAQOOL サポートのお問い合わせフォームです。図面と案件の�
 
 1. 利用者が `public/index.php` のフォームに会社名・案件情報・図面の希望納期を入力し、図面(PDF・JWW)を添付して送信します。
 2. `public/index.php` が入力とファイルを確かめ、ボット対策を通ったら、Google Apps Script(`Code.gs`)に受付を依頼します。
-3. `src/lib.php` が図面を Google ドライブに保存します。
+3. `src/lib.php` が図面を Google ドライブの「会社名/案件名」フォルダに保存します。
 4. `Code.gs` が受付一覧のシートと、案件管理表の「案件基本情報」に1行ずつ追加し、通知メールを送ります。
 5. 受付が終わると `public/complete.php` に移ります。
 

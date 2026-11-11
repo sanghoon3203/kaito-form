@@ -262,8 +262,11 @@ function prepareDriveUploads(props, data) {
   lock.waitLock(25000);
   let folderId;
   try {
-    const existing = root.getFoldersByName(company);
-    folderId = (existing.hasNext() ? existing.next() : root.createFolder(company)).getId();
+    // 保存先は「会社名/案件名」。同じ名前のフォルダがあれば、それを使う
+    const child = (parent, name) => { const found = parent.getFoldersByName(name); return found.hasNext() ? found.next() : parent.createFolder(name); };
+    const companyFolder = child(root, company);
+    const project = String(data.projectName || '').replace(/[\/\\\x00-\x1f]/g, ' ').trim();
+    folderId = (project ? child(companyFolder, project) : companyFolder).getId();
   } finally {
     lock.releaseLock();
   }

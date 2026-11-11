@@ -88,7 +88,7 @@ page_start('お問い合わせ | BAQOOL サポート');
         <div class="field"><label for="finish">完工予定日<span class="req">必須</span></label><input id="finish" name="finish" type="date" required aria-describedby="finish-hint" value="<?= $v('finish') ?>"><p class="hint" id="finish-hint">おおよその日付で構いません。</p></div>
       </div>
       <div class="grid">
-        <div class="field"><label for="deadline">図面の希望納期<span class="req">必須</span></label><input id="deadline" name="deadline" type="date" required aria-describedby="deadline-hint" value="<?= $v('deadline') ?>"><p class="hint" id="deadline-hint">お申し込み日を除いて4営業日後となります。</p></div>
+        <div class="field"><label for="deadline">図面の希望納期<span class="req">必須</span></label><input id="deadline" name="deadline" type="date" required aria-describedby="deadline-hint" value="<?= $v('deadline') ?>"><p class="hint" id="deadline-hint">お申し込み日を除いて4営業日後となります。</p><p class="file-error" id="deadline-error" role="alert"></p></div>
         <div class="field"><label for="rush">納期の短縮<span class="req">必須</span></label><select id="rush" name="rush" required aria-describedby="rush-hint">
           <?php foreach (array_keys(RUSH_OPTIONS) as $rush): ?><option<?= ($values['rush'] ?? '') === $rush ? ' selected' : '' ?>><?= h($rush) ?></option><?php endforeach; ?>
         </select><p class="hint" id="rush-hint">納期の短縮には追加料金がかかります。</p></div>
@@ -233,18 +233,29 @@ page_start('お問い合わせ | BAQOOL サポート');
   const lateAt = box.dataset.lateIn === '' ? null : Date.now() + Number(box.dataset.lateIn); // 今日の営業時間が終わる時刻
   const form = box.closest('form');
   const out = document.getElementById('delivery-date');
+  const error = document.getElementById('deadline-error');
+  const jp = date => { const [y, m, d] = date.split('-').map(Number); return date.replaceAll('-', '/') + '（' + '日月火水木金土'[new Date(y, m - 1, d).getDay()] + '）'; };
+  let mismatch = false;
   const show = () => {
     const rush = form.elements.rush.value;
     const wish = form.elements.deadline.value;
     const dates = lateAt !== null && Date.now() >= lateAt ? late : early;
     let date = dates[rush] || dates['希望しない'];
     if (rush === '希望しない' && wish > date) date = wish; // 短縮なしで、希望納期のほうが後ならそちら
-    const [y, m, d] = date.split('-').map(Number);
-    out.textContent = date.replaceAll('-', '/') + '（' + '日月火水木金土'[new Date(y, m - 1, d).getDay()] + '）';
+    out.textContent = jp(date);
+    // 納期の短縮を選んだのに、希望納期がその日付と違うときは送信させない
+    mismatch = rush !== '希望しない' && wish !== '' && wish !== dates[rush];
+    error.textContent = mismatch ? '納期の短縮「' + rush + '」を選んだ場合、希望納期は ' + jp(dates[rush]) +
+      ' になります。希望納期を合わせるか、納期の短縮を選び直してください。' : '';
+    form.elements.deadline.classList.toggle('invalid', mismatch);
+    form.elements.rush.classList.toggle('invalid', mismatch);
   };
   form.elements.rush.addEventListener('change', show);
   form.elements.deadline.addEventListener('change', show);
-  form.addEventListener('submit', show); // 確認画面を出す直前にも計算し直す
+  form.addEventListener('submit', event => { // 確認画面を出す直前にも計算し直す
+    show();
+    if (mismatch) { event.preventDefault(); form.elements.deadline.focus(); }
+  });
   setInterval(show, 30000);
   show();
 })();

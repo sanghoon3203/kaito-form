@@ -256,6 +256,13 @@ function validate_fields(array $post): array {
       $errors[] = $label . 'をご確認ください。';
     }
   }
+  // 納期の短縮を選んだら、希望納期はその営業日数後の日付でなければならない
+  if (!$errors && $fields['rush'] !== '希望しない') {
+    $rushDate = delivery_date($fields['rush'], '');
+    if ($fields['deadline'] !== $rushDate) {
+      $errors[] = '納期の短縮「' . $fields['rush'] . '」を選んだ場合、図面の希望納期は ' . jp_date($rushDate) . ' になります。希望納期を合わせるか、納期の短縮を選び直してください。';
+    }
+  }
   // 案件管理表には「案件名」「案件住所」の1列ずつで書く
   $fields['projectName'] = $fields['projectSei'] . '　' . $fields['projectMei']; // 既存の行と同じく全角スペース
   $fields['projectAddress'] = $fields['pref'] . $fields['city'] . $fields['street'];

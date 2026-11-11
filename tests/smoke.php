@@ -16,6 +16,7 @@ function write_env(array $extra = []) {
     // Cloudflare のテスト用キー(常に成功)。後ろに同じキーを書けば上書きできる
     'TURNSTILE_SITE_KEY=1x00000000000000000000AA',
     'TURNSTILE_SECRET=1x0000000000000000000000000000000AA',
+    'TEST_NOW=2026-11-11 13:00', // 水曜の営業時間内として納品予定日を計算する
   ], $extra)));
 }
 write_env(['MIN_FORM_SECONDS=0', 'RATE_LIMIT_PER_HOUR=1000']);
@@ -55,7 +56,7 @@ $pdf = '%PDF-1.7 test drawing';
 $jww = "JwwData.\xc8\x02\x00\x00 test";
 $fields = ['company' => 'テスト工務店', 'branch' => '大阪支店', 'contact' => '山田', 'email' => 'test@example.com',
   'projectSei' => '山田', 'projectMei' => '太郎', 'pref' => '大阪府', 'city' => '大阪市', 'street' => '1-2-3',
-  'heating' => 'ﾌｧﾝｺﾝﾍﾞｸﾀｰ', 'start' => '2026-12-01', 'finish' => '2026-12-20', 'deadline' => '2026-11-20',
+  'heating' => 'ﾌｧﾝｺﾝﾍﾞｸﾀｰ', 'start' => '2026-12-01', 'finish' => '2026-12-20', 'deadline' => '2026-11-13',
   'rush' => '2営業日後（+2万円）', 'note' => '=SUM(A1)', 'website' => '', 'cf-turnstile-response' => 'XXXX.DUMMY.TOKEN'];
 $form = function (array $override = [], ?array $files = null) use ($fields, $pdf, $jww) {
   $files = $files ?? ['drawing[0]' => file_of('plan.pdf', $pdf), 'drawing[1]' => file_of('plan.jww', $jww)];
@@ -106,6 +107,10 @@ try {
   }
   [$s, $body] = request('index.php', $form(['pref' => '東京']));
   check('unknown 都道府県 is rejected', $s === 422 && strpos($body, '都道府県をご確認ください') !== false);
+  [$s, $body] = request('index.php', $form(['deadline' => '2026-11-20']));
+  check('rush with a different desired date is rejected', $s === 422 && strpos($body, '図面の希望納期は 2026/11/13（金） になります') !== false);
+  [$s, $body] = request('index.php', $form(['rush' => '希望しない', 'deadline' => '2026-11-20']));
+  check('no rush accepts any desired date', $s === 303);
   [$s, $body] = request('index.php', $form(['deadline' => '2026-02-30']));
   check('impossible date is rejected', $s === 422 && strpos($body, '図面の希望納期をご確認ください') !== false);
   check('entered values are kept after an error', strpos($body, 'value="テスト工務店"') !== false && strpos($body, '>=SUM(A1)</textarea>') !== false);
